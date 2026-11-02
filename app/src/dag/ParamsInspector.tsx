@@ -1,5 +1,12 @@
 // Interactive Parameters & Recursive Sub-Config Inspector for DagView
-import React, { useMemo, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   GraphNode,
   SerializedEnumRef,
@@ -39,6 +46,135 @@ function copyText(text: string) {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
+}
+
+/** Search context to track query, active match index, and auto-registration of matches */
+interface SearchContextType {
+  filter: string;
+  activeMatchIndex: number;
+  registerMatch: () => { index: number; isActive: boolean };
+  activeRef: React.MutableRefObject<HTMLElement | null>;
+}
+
+const SearchContext = createContext<SearchContextType>({
+  filter: "",
+  activeMatchIndex: -1,
+  registerMatch: () => ({ index: -1, isActive: false }),
+  activeRef: { current: null },
+});
+
+export const HighlightedText = ({
+  text,
+  className = "",
+}: {
+  text: string;
+  className?: string;
+}) => {
+  const { filter, registerMatch, activeRef } = useContext(SearchContext);
+
+  if (!filter.trim() || !text) {
+    return <span className={className}>{text}</span>;
+  }
+
+  const escaped = filter.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escaped})`, "gi");
+  const parts = text.split(regex);
+
+  if (parts.length === 1) {
+    return <span className={className}>{text}</span>;
+  }
+
+  return (
+    <span className={className}>
+      {parts.map((part, i) => {
+        if (regex.test(part)) {
+          const { index, isActive } = registerMatch();
+          return (
+            <mark
+              key={i}
+              ref={isActive ? (el) => { if (el) activeRef.current = el; } : undefined}
+              data-match-index={index}
+              className={`xpm-dag-highlight ${isActive ? "active" : ""}`}
+            >
+              {part}
+            </mark>
+          );
+        }
+        return part;
+      })}
+    </span>
+  );
+};
+
+function countMatchesInString(text: string, query: string): number {
+  if (!query.trim() || !text) return 0;
+  const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = text.match(new RegExp(escaped, "gi"));
+  return matches ? matches.length : 0;
+}
+
+function countMatchesInValue(
+  name: string,
+  val: unknown,
+  query: string,
+  objects: { [id: string]: SerializedObject },
+  ancestors: Set<number>,
+): number {
+  let count = countMatchesInString(name, query);
+
+  if (isFieldRef(val)) {
+    const subId = Number(val.value);
+    count += countMatchesInObject(subId, query, objects, ancestors);
+  } else if (isPathRef(val)) {
+    count += countMatchesInString(val.value, query);
+    if (val.base) count += countMatchesInString(val.base, query);
+  } else if (isEnumRef(val)) {
+    count += countMatchesInString(`${val.enum}.${val.value}`, query);
+  } else if (Array.isArray(val)) {
+    val.forEach((item, idx) => {
+      count += countMatchesInValue(`[${idx}]`, item, query, objects, ancestors);
+    });
+  } else if (typeof val === "object" && val !== null) {
+    Object.entries(val as Record<string, unknown>).forEach(([k, item]) => {
+      count += countMatchesInValue(k, item, query, objects, ancestors);
+    });
+  } else {
+    count += countMatchesInString(formatScalar(val), query);
+  }
+
+  return count;
+}
+
+function countMatchesInObject(
+  oid: number,
+  query: string,
+  objects: { [id: string]: SerializedObject },
+  ancestors = new Set<number>(),
+): number {
+  if (ancestors.has(oid)) return 0;
+  const obj = objects[String(oid)];
+  if (!obj) return 0;
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(oid);
+
+  const typeName = obj.type || obj.typename?.split(".").pop() || `Config_${oid}`;
+  const shortId = obj.identifier ? obj.identifier.slice(0, 8) : `#${oid}`;
+
+  let count = countMatchesInString(typeName, query) + countMatchesInString(shortId, query);
+
+  const fields = obj.fields || {};
+  for (const [k, v] of Object.entries(fields)) {
+    count += countMatchesInValue(k, v, query, objects, nextAncestors);
+  }
+
+  const initTasks = obj["init-tasks"] || [];
+  initTasks.forEach((itId, idx) => {
+    count += countMatchesInString(`init[${idx}]`, query);
+    count += countMatchesInObject(Number(itId), query, objects, nextAncestors);
+  });
+
+  return count;
 }
 
 /** Synthesize Python .C(...) configuration snippet from serialized object graph */
@@ -177,8 +313,10 @@ export const ParamsInspector = ({
 }: ParamsInspectorProps) => {
   const [mode, setMode] = useState<ViewMode>("tree");
   const [filter, setFilter] = useState("");
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0);
   const [copied, setCopied] = useState<string | null>(null);
   const [groupFields, setGroupFields] = useState(true);
+  const activeRef = useRef<HTMLElement | null>(null);
 
   // Find root object for this node
   const rootObj = useMemo(() => {
@@ -228,6 +366,41 @@ export const ParamsInspector = ({
     return counts;
   }, [objects]);
 
+  // Compute total matches in tree
+  const totalMatches = useMemo(() => {
+    if (!filter.trim() || !rootObj) return 0;
+    return countMatchesInObject(rootObj.id, filter, objects);
+  }, [filter, rootObj, objects]);
+
+  // Reset or clamp activeMatchIndex when totalMatches changes
+  useEffect(() => {
+    if (totalMatches === 0) {
+      setActiveMatchIndex(0);
+    } else if (activeMatchIndex >= totalMatches) {
+      setActiveMatchIndex(0);
+    }
+  }, [totalMatches]);
+
+  // Smooth scroll active match into view
+  useEffect(() => {
+    if (filter && activeRef.current) {
+      activeRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [activeMatchIndex, filter]);
+
+  const goToNextMatch = () => {
+    if (totalMatches <= 0) return;
+    setActiveMatchIndex((prev) => (prev + 1) % totalMatches);
+  };
+
+  const goToPrevMatch = () => {
+    if (totalMatches <= 0) return;
+    setActiveMatchIndex((prev) => (prev - 1 + totalMatches) % totalMatches);
+  };
+
   if (!rootObj) {
     // Graceful fallback to scalar tags when object definitions are not embedded
     return (
@@ -247,127 +420,198 @@ export const ParamsInspector = ({
     );
   }
 
-  const matchesFilter = (text: string) => {
-    if (!filter) return true;
-    return text.toLowerCase().includes(filter.toLowerCase());
+  // Mutable counter for assigning match indices during render
+  let matchCounter = 0;
+  const registerMatch = () => {
+    const index = matchCounter++;
+    return {
+      index,
+      isActive: index === activeMatchIndex,
+    };
+  };
+
+  const searchContextValue: SearchContextType = {
+    filter,
+    activeMatchIndex,
+    registerMatch,
+    activeRef,
   };
 
   return (
-    <div className="xpm-dag-inspector">
-      <div className="xpm-dag-inspector-toolbar">
-        <div className="xpm-dag-inspector-modes">
-          <button
-            className={`xpm-dag-mode-btn ${mode === "tree" ? "active" : ""}`}
-            onClick={() => setMode("tree")}
-            title="Interactive Tree Explorer"
-          >
-            Tree
-          </button>
-          <button
-            className={`xpm-dag-mode-btn ${mode === "code" ? "active" : ""}`}
-            onClick={() => setMode("code")}
-            title="Python .C(...) Snippet"
-          >
-            Python
-          </button>
-          <button
-            className={`xpm-dag-mode-btn ${mode === "json" ? "active" : ""}`}
-            onClick={() => setMode("json")}
-            title="JSON view"
-          >
-            JSON
-          </button>
+    <SearchContext.Provider value={searchContextValue}>
+      <div className="xpm-dag-inspector">
+        <div className="xpm-dag-inspector-toolbar">
+          <div className="xpm-dag-inspector-modes">
+            <button
+              className={`xpm-dag-mode-btn ${mode === "tree" ? "active" : ""}`}
+              onClick={() => setMode("tree")}
+              title="Interactive Tree Explorer"
+            >
+              Tree
+            </button>
+            <button
+              className={`xpm-dag-mode-btn ${mode === "code" ? "active" : ""}`}
+              onClick={() => setMode("code")}
+              title="Python .C(...) Snippet"
+            >
+              Python
+            </button>
+            <button
+              className={`xpm-dag-mode-btn ${mode === "json" ? "active" : ""}`}
+              onClick={() => setMode("json")}
+              title="JSON view"
+            >
+              JSON
+            </button>
+          </div>
+
+          {mode === "tree" && (
+            <div className="xpm-dag-inspector-tools">
+              <button
+                className="xpm-dag-tool-btn"
+                onClick={() => setGroupFields(!groupFields)}
+                title={groupFields ? "Show alphabetical flat list" : "Show categorized groups"}
+              >
+                {groupFields ? "Flat" : "Categorized"}
+              </button>
+            </div>
+          )}
         </div>
 
         {mode === "tree" && (
-          <div className="xpm-dag-inspector-tools">
-            <button
-              className="xpm-dag-tool-btn"
-              onClick={() => setGroupFields(!groupFields)}
-              title={groupFields ? "Show alphabetical flat list" : "Show categorized groups"}
-            >
-              {groupFields ? "Flat" : "Categorized"}
-            </button>
+          <div className="xpm-dag-search-bar">
+            <div className="xpm-dag-search-input-wrap">
+              <input
+                type="text"
+                className="xpm-dag-search-input"
+                placeholder="Filter parameters (e.g. lr, model, epochs)..."
+                value={filter}
+                onChange={(e) => {
+                  setFilter(e.target.value);
+                  setActiveMatchIndex(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                      goToPrevMatch();
+                    } else {
+                      goToNextMatch();
+                    }
+                  }
+                }}
+              />
+              {filter && (
+                <button
+                  className="xpm-dag-search-clear"
+                  onClick={() => {
+                    setFilter("");
+                    setActiveMatchIndex(0);
+                  }}
+                  title="Clear search"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            {filter.trim() && (
+              <>
+                <span
+                  className={`xpm-dag-match-badge ${
+                    totalMatches === 0 ? "no-match" : ""
+                  }`}
+                  title={`${totalMatches} matches found across parameters`}
+                >
+                  {totalMatches === 0
+                    ? "0 matches"
+                    : `${activeMatchIndex + 1} of ${totalMatches}`}
+                </span>
+
+                <div className="xpm-dag-search-nav">
+                  <button
+                    className="xpm-dag-search-nav-btn"
+                    disabled={totalMatches <= 1}
+                    onClick={goToPrevMatch}
+                    title="Previous match (Shift+Enter)"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    className="xpm-dag-search-nav-btn"
+                    disabled={totalMatches <= 1}
+                    onClick={goToNextMatch}
+                    title="Next match (Enter)"
+                  >
+                    ▼
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {mode === "tree" && (
+          <div className="xpm-dag-tree-scroll">
+            {filter.trim() && totalMatches === 0 ? (
+              <div className="xpm-dag-no-matches">
+                No parameters or sub-configs match "{filter}"
+              </div>
+            ) : (
+              <ObjectTreeNode
+                oid={rootObj.id}
+                objects={objects}
+                ancestors={[]}
+                isRoot={true}
+                filter={filter}
+                groupFields={groupFields}
+                sharedCounts={sharedCounts}
+                onOpenJob={onOpenJob}
+              />
+            )}
+          </div>
+        )}
+
+        {mode === "code" && (
+          <div className="xpm-dag-code-pane">
+            <div className="xpm-dag-code-actions">
+              <button
+                className="xpm-dag-copy-btn"
+                onClick={() =>
+                  handleCopy(toPythonSnippet(rootObj.id, objects), "python")
+                }
+              >
+                {copied === "python" ? "✓ Copied" : "Copy Python"}
+              </button>
+            </div>
+            <pre className="xpm-dag-code-block">
+              {toPythonSnippet(rootObj.id, objects)}
+            </pre>
+          </div>
+        )}
+
+        {mode === "json" && (
+          <div className="xpm-dag-code-pane">
+            <div className="xpm-dag-code-actions">
+              <button
+                className="xpm-dag-copy-btn"
+                onClick={() =>
+                  handleCopy(
+                    JSON.stringify(resolveToJson(rootObj.id, objects), null, 2),
+                    "json",
+                  )
+                }
+              >
+                {copied === "json" ? "✓ Copied" : "Copy JSON"}
+              </button>
+            </div>
+            <pre className="xpm-dag-code-block">
+              {JSON.stringify(resolveToJson(rootObj.id, objects), null, 2)}
+            </pre>
           </div>
         )}
       </div>
-
-      {mode === "tree" && (
-        <div className="xpm-dag-search-bar">
-          <input
-            type="text"
-            className="xpm-dag-search-input"
-            placeholder="Filter parameters (e.g. lr, model, epochs)..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          {filter && (
-            <button
-              className="xpm-dag-search-clear"
-              onClick={() => setFilter("")}
-              title="Clear search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-      )}
-
-      {mode === "tree" && (
-        <div className="xpm-dag-tree-scroll">
-          <ObjectTreeNode
-            oid={rootObj.id}
-            objects={objects}
-            ancestors={[]}
-            isRoot={true}
-            filter={filter}
-            matchesFilter={matchesFilter}
-            groupFields={groupFields}
-            sharedCounts={sharedCounts}
-            onOpenJob={onOpenJob}
-          />
-        </div>
-      )}
-
-      {mode === "code" && (
-        <div className="xpm-dag-code-pane">
-          <div className="xpm-dag-code-actions">
-            <button
-              className="xpm-dag-copy-btn"
-              onClick={() =>
-                handleCopy(toPythonSnippet(rootObj.id, objects), "python")
-              }
-            >
-              {copied === "python" ? "✓ Copied" : "Copy Python"}
-            </button>
-          </div>
-          <pre className="xpm-dag-code-block">
-            {toPythonSnippet(rootObj.id, objects)}
-          </pre>
-        </div>
-      )}
-
-      {mode === "json" && (
-        <div className="xpm-dag-code-pane">
-          <div className="xpm-dag-code-actions">
-            <button
-              className="xpm-dag-copy-btn"
-              onClick={() =>
-                handleCopy(
-                  JSON.stringify(resolveToJson(rootObj.id, objects), null, 2),
-                  "json",
-                )
-              }
-            >
-              {copied === "json" ? "✓ Copied" : "Copy JSON"}
-            </button>
-          </div>
-          <pre className="xpm-dag-code-block">
-            {JSON.stringify(resolveToJson(rootObj.id, objects), null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
+    </SearchContext.Provider>
   );
 };
 
@@ -379,7 +623,6 @@ interface ObjectTreeNodeProps {
   label?: string;
   isRoot?: boolean;
   filter: string;
-  matchesFilter: (text: string) => boolean;
   groupFields: boolean;
   sharedCounts: Map<number, number>;
   onOpenJob?: (node: GraphNode) => void;
@@ -392,12 +635,11 @@ const ObjectTreeNode = ({
   label,
   isRoot = false,
   filter,
-  matchesFilter,
   groupFields,
   sharedCounts,
   onOpenJob,
 }: ObjectTreeNodeProps) => {
-  const [expanded, setExpanded] = useState<boolean>(true);
+  const [userExpanded, setUserExpanded] = useState<boolean>(true);
   const obj = objects[String(oid)];
 
   if (!obj) {
@@ -416,7 +658,11 @@ const ObjectTreeNode = ({
   if (ancestors.includes(oid)) {
     return (
       <div className="xpm-dag-tree-row xpm-dag-cycle-row">
-        {label && <span className="xpm-dag-field-name">{label}: </span>}
+        {label && (
+          <span className="xpm-dag-field-name">
+            <HighlightedText text={label} />:{" "}
+          </span>
+        )}
         <span className="xpm-dag-badge-cycle" title="Circular reference cycle">
           🔁 [Cycle to {typeName} #{oid}]
         </span>
@@ -429,6 +675,25 @@ const ObjectTreeNode = ({
 
   const fields = obj.fields || {};
   const nextAncestors = [...ancestors, oid];
+
+  // Match detection: check if self or children match query
+  const selfMatches = filter.trim()
+    ? countMatchesInString(label || "", filter) +
+      countMatchesInString(typeName, filter) +
+      countMatchesInString(shortId, filter)
+    : 0;
+
+  const totalMatchesInSubtree = filter.trim()
+    ? countMatchesInObject(oid, filter, objects, new Set(ancestors))
+    : 0;
+
+  // If search filter is active and this node + subtree has 0 matches, hide this entire branch!
+  if (filter.trim() && totalMatchesInSubtree === 0 && selfMatches === 0 && !isRoot) {
+    return null;
+  }
+
+  // When search filter is active and matches exist in subtree or self, GUARANTEE unfolding!
+  const expanded = filter.trim() ? true : userExpanded;
 
   // Partition fields into categories matching experimaestro inspect
   const hparams: Array<[string, unknown]> = [];
@@ -461,14 +726,18 @@ const ObjectTreeNode = ({
       {!isRoot && (
         <div
           className="xpm-dag-tree-header"
-          onClick={() => setExpanded(!expanded)}
+          onClick={() => setUserExpanded(!userExpanded)}
           title="Click to toggle expansion"
         >
           <span className="xpm-dag-tree-toggle">{expanded ? "▼" : "▶"}</span>
-          {label && <span className="xpm-dag-field-name">{label}: </span>}
-          <span className="xpm-dag-type-badge">{typeName}</span>
+          {label && (
+            <span className="xpm-dag-field-name">
+              <HighlightedText text={label} />:{" "}
+            </span>
+          )}
+          <HighlightedText text={typeName} className="xpm-dag-type-badge" />
           <span className="xpm-dag-tree-hash" title={obj.identifier || String(oid)}>
-            [{shortId}]
+            [<HighlightedText text={shortId} />]
           </span>
           {isShared && (
             <span
@@ -494,7 +763,6 @@ const ObjectTreeNode = ({
                       name={k}
                       value={v}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                     />
                   ))}
                 </div>
@@ -509,7 +777,6 @@ const ObjectTreeNode = ({
                       name={k}
                       spec={v}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                     />
                   ))}
                 </div>
@@ -526,7 +793,6 @@ const ObjectTreeNode = ({
                       ancestors={nextAncestors}
                       label={k}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                       groupFields={groupFields}
                       sharedCounts={sharedCounts}
                       onOpenJob={onOpenJob}
@@ -546,7 +812,6 @@ const ObjectTreeNode = ({
                       objects={objects}
                       ancestors={nextAncestors}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                       groupFields={groupFields}
                       sharedCounts={sharedCounts}
                       onOpenJob={onOpenJob}
@@ -566,7 +831,6 @@ const ObjectTreeNode = ({
                       ancestors={nextAncestors}
                       label={`init[${idx}]`}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                       groupFields={groupFields}
                       sharedCounts={sharedCounts}
                       onOpenJob={onOpenJob}
@@ -590,7 +854,6 @@ const ObjectTreeNode = ({
                         ancestors={nextAncestors}
                         label={k}
                         filter={filter}
-                        matchesFilter={matchesFilter}
                         groupFields={groupFields}
                         sharedCounts={sharedCounts}
                         onOpenJob={onOpenJob}
@@ -604,7 +867,6 @@ const ObjectTreeNode = ({
                         name={k}
                         spec={v}
                         filter={filter}
-                        matchesFilter={matchesFilter}
                       />
                     );
                   }
@@ -617,7 +879,6 @@ const ObjectTreeNode = ({
                         objects={objects}
                         ancestors={nextAncestors}
                         filter={filter}
-                        matchesFilter={matchesFilter}
                         groupFields={groupFields}
                         sharedCounts={sharedCounts}
                         onOpenJob={onOpenJob}
@@ -630,7 +891,6 @@ const ObjectTreeNode = ({
                       name={k}
                       value={v}
                       filter={filter}
-                      matchesFilter={matchesFilter}
                     />
                   );
                 })}
@@ -647,24 +907,29 @@ const FieldValueRow = ({
   name,
   value,
   filter,
-  matchesFilter,
 }: {
   name: string;
   value: unknown;
   filter: string;
-  matchesFilter: (text: string) => boolean;
 }) => {
   const valStr = formatScalar(value);
-  const match = matchesFilter(name) || matchesFilter(valStr);
+  const match = filter.trim()
+    ? name.toLowerCase().includes(filter.toLowerCase()) ||
+      valStr.toLowerCase().includes(filter.toLowerCase())
+    : false;
 
-  if (filter && !match) {
+  if (filter.trim() && !match) {
     return null;
   }
 
   return (
-    <div className={`xpm-dag-tree-row ${filter && match ? "matched" : ""}`}>
-      <span className="xpm-dag-field-name">{name}: </span>
-      <span className={`xpm-dag-field-val ${scalarTypeClass(value)}`}>{valStr}</span>
+    <div className={`xpm-dag-tree-row ${match ? "matched" : ""}`}>
+      <span className="xpm-dag-field-name">
+        <HighlightedText text={name} />:{" "}
+      </span>
+      <span className={`xpm-dag-field-val ${scalarTypeClass(value)}`}>
+        <HighlightedText text={valStr} />
+      </span>
     </div>
   );
 };
@@ -674,18 +939,20 @@ const PathValueRow = ({
   name,
   spec,
   filter,
-  matchesFilter,
 }: {
   name: string;
   spec: SerializedPathRef;
   filter: string;
-  matchesFilter: (text: string) => boolean;
 }) => {
   const [copied, setCopied] = useState(false);
   const pathStr = spec.value;
-  const match = matchesFilter(name) || matchesFilter(pathStr);
+  const match = filter.trim()
+    ? name.toLowerCase().includes(filter.toLowerCase()) ||
+      pathStr.toLowerCase().includes(filter.toLowerCase()) ||
+      (spec.base?.toLowerCase().includes(filter.toLowerCase()) ?? false)
+    : false;
 
-  if (filter && !match) {
+  if (filter.trim() && !match) {
     return null;
   }
 
@@ -697,12 +964,18 @@ const PathValueRow = ({
   };
 
   return (
-    <div className={`xpm-dag-tree-row xpm-dag-path-row ${filter && match ? "matched" : ""}`}>
-      <span className="xpm-dag-field-name">{name}: </span>
-      <span className="xpm-dag-path-val" title={pathStr}>
-        {pathStr}
+    <div className={`xpm-dag-tree-row xpm-dag-path-row ${match ? "matched" : ""}`}>
+      <span className="xpm-dag-field-name">
+        <HighlightedText text={name} />:{" "}
       </span>
-      {spec.base && <span className="xpm-dag-path-base">[{spec.base}]</span>}
+      <span className="xpm-dag-path-val" title={pathStr}>
+        <HighlightedText text={pathStr} />
+      </span>
+      {spec.base && (
+        <span className="xpm-dag-path-base">
+          [<HighlightedText text={spec.base} />]
+        </span>
+      )}
       <button
         className="xpm-dag-path-copy"
         onClick={handleCopy}
@@ -721,7 +994,6 @@ const CollectionRow = ({
   objects,
   ancestors,
   filter,
-  matchesFilter,
   groupFields,
   sharedCounts,
   onOpenJob,
@@ -731,12 +1003,11 @@ const CollectionRow = ({
   objects: { [id: string]: SerializedObject };
   ancestors: number[];
   filter: string;
-  matchesFilter: (text: string) => boolean;
   groupFields: boolean;
   sharedCounts: Map<number, number>;
   onOpenJob?: (node: GraphNode) => void;
 }) => {
-  const [expanded, setExpanded] = useState<boolean>(true);
+  const [userExpanded, setUserExpanded] = useState<boolean>(true);
   const isArr = Array.isArray(value);
   const items = isArr
     ? (value as unknown[]).map((v, i) => [`[${i}]`, v] as [string, unknown])
@@ -744,15 +1015,41 @@ const CollectionRow = ({
 
   const count = items.length;
 
+  // Check if collection itself or any items match
+  const selfMatches = filter.trim() ? countMatchesInString(name, filter) : 0;
+  const totalItemMatches = filter.trim()
+    ? items.reduce(
+        (sum, [subName, subVal]) =>
+          sum +
+          countMatchesInValue(
+            subName,
+            subVal,
+            filter,
+            objects,
+            new Set(ancestors),
+          ),
+        0,
+      )
+    : 0;
+
+  if (filter.trim() && selfMatches === 0 && totalItemMatches === 0) {
+    return null;
+  }
+
+  // When searching, guarantee unfolding!
+  const expanded = filter.trim() ? true : userExpanded;
+
   return (
     <div className="xpm-dag-collection">
       <div
         className="xpm-dag-tree-header"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setUserExpanded(!userExpanded)}
         title="Click to toggle collection"
       >
         <span className="xpm-dag-tree-toggle">{expanded ? "▼" : "▶"}</span>
-        <span className="xpm-dag-field-name">{name}: </span>
+        <span className="xpm-dag-field-name">
+          <HighlightedText text={name} />:{" "}
+        </span>
         <span className="xpm-dag-coll-type">
           {isArr ? `Array(${count})` : `Dict(${count})`}
         </span>
@@ -770,7 +1067,6 @@ const CollectionRow = ({
                   ancestors={ancestors}
                   label={subName}
                   filter={filter}
-                  matchesFilter={matchesFilter}
                   groupFields={groupFields}
                   sharedCounts={sharedCounts}
                   onOpenJob={onOpenJob}
@@ -784,7 +1080,6 @@ const CollectionRow = ({
                   name={subName}
                   spec={subVal}
                   filter={filter}
-                  matchesFilter={matchesFilter}
                 />
               );
             }
@@ -800,7 +1095,6 @@ const CollectionRow = ({
                   objects={objects}
                   ancestors={ancestors}
                   filter={filter}
-                  matchesFilter={matchesFilter}
                   groupFields={groupFields}
                   sharedCounts={sharedCounts}
                   onOpenJob={onOpenJob}
@@ -813,7 +1107,6 @@ const CollectionRow = ({
                 name={subName}
                 value={subVal}
                 filter={filter}
-                matchesFilter={matchesFilter}
               />
             );
           })}
@@ -841,4 +1134,3 @@ function scalarTypeClass(v: unknown): string {
   if (isEnumRef(v)) return "val-enum";
   return "val-other";
 }
-

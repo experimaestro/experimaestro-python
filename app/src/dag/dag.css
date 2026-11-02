@@ -383,8 +383,17 @@
 }
 
 .xpm-dag-search-bar {
-  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   margin-bottom: 0.4rem;
+}
+
+.xpm-dag-search-input-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
 }
 
 .xpm-dag-search-input {
@@ -417,6 +426,72 @@
   font-size: 14px;
   line-height: 1;
   padding: 0;
+}
+
+.xpm-dag-match-badge {
+  font-size: 11px;
+  color: var(--xpm-dag-muted);
+  background: var(--xpm-dag-tag-bg);
+  padding: 2px 7px;
+  border-radius: 10px;
+  white-space: nowrap;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.xpm-dag-match-badge.no-match {
+  color: #cf222e;
+  background: #ffebe9;
+  font-weight: 600;
+}
+
+.xpm-dag-search-nav {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.xpm-dag-search-nav-btn {
+  border: 1px solid var(--xpm-dag-border);
+  background: var(--xpm-dag-bg);
+  color: var(--xpm-dag-muted);
+  font-size: 10px;
+  padding: 0.2rem 0.35rem;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.xpm-dag-search-nav-btn:hover:not(:disabled) {
+  background: var(--xpm-dag-tag-bg);
+  color: inherit;
+}
+
+.xpm-dag-search-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.xpm-dag-no-matches {
+  padding: 1.2rem 0.5rem;
+  color: var(--xpm-dag-muted);
+  font-size: 12px;
+  text-align: center;
+  font-style: italic;
+}
+
+/* Substring search highlighting */
+mark.xpm-dag-highlight {
+  background: #ffdf5d;
+  color: #1f2328;
+  font-weight: 700;
+  padding: 0 2px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(212, 167, 44, 0.4);
+}
+
+mark.xpm-dag-highlight.active {
+  background: #ff9800;
+  color: #ffffff;
+  box-shadow: 0 0 0 2px #e65100;
 }
 
 .xpm-dag-tree-scroll {
@@ -517,7 +592,9 @@
 }
 
 .xpm-dag-tree-row.matched {
-  background: #fff8c5;
+  border-left: 2px solid #d4a72c;
+  padding-left: 0.35rem;
+  background: rgba(255, 223, 93, 0.12);
 }
 
 .xpm-dag-field-name {
