@@ -333,55 +333,42 @@
   }
 }
 
-.dependencies {
-  display: inline-block;
-  margin-left: 8px;
-  font-size: 0.75rem;
-  line-height: 1.2rem;
+/* Failure icon, after the status badge */
+.status-badge-failure {
+  white-space: nowrap;
+}
 
-  .dependencies-label {
-    color: #666;
-    font-style: italic;
-    margin-right: 4px;
-  }
+.status-badge-icon {
+  margin-left: 4px;
+}
+
+/* Failure details in the job detail */
+.job-detail-failure .failure-message {
+  font-family: var(--bs-font-monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--bs-danger);
+}
+
+/* Dependencies in the job detail: one link per dependency */
+.dependencies {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 
   .dependency {
-    display: inline-block;
-    padding: 2px 6px;
-    margin: 1px 2px;
-    border-radius: 3px;
-    font-size: 0.7rem;
-    font-weight: 500;
-    cursor: default;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    color: inherit;
 
-    &.status-done {
-      background: #c8e6c9;
-      color: #2e7d32;
+    &:hover .dependency-task {
+      text-decoration: underline;
     }
 
-    &.status-running {
-      background: #fff9c4;
-      color: #f57f17;
-    }
-
-    &.status-waiting {
-      background: #ffe0b2;
-      color: #e65100;
-    }
-
-    &.status-ready {
-      background: #fff59d;
-      color: #827717;
-    }
-
-    &.status-error {
-      background: #ffcdd2;
-      color: #c62828;
-    }
-
-    &.status-unknown {
-      background: #e0e0e0;
-      color: #616161;
+    .dependency-task {
+      font-weight: bold;
     }
   }
 }

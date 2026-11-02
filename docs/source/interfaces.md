@@ -69,8 +69,12 @@ Then open `http://localhost:12345` in your browser.
   jobs) in the job list of every experiment; hidden tags can still be used to
   filter and group
 - **Real-time Updates**: WebSocket-based updates as job states change
-- **Job Details**: Click on a job to view parameters, logs, output paths and its
-  dependencies with their status
+- **Failure reasons**: the status of a failed job tells why it failed with the
+  icon of the TUI (❌ the job failed, 🔗 a dependency failed, ⏱ timeout,
+  💾 memory, 🚫 rejected by the launcher); hover it for the description
+- **Job Details**: Click on a job to view parameters, logs, output paths, its
+  failure reason with what happened (see below) and its dependencies with their status (click a dependency to
+  open its details, e.g. to find the job at the source of a failure)
 - **Copying**: In the job list, a click on the task name copies it, a click on
   the job hash copies `<task id>/<job id>` and a shift-click on the job hash
   copies the job folder (for a workspace monitored over SSH, the remote
@@ -156,8 +160,9 @@ experimaestro --workdir /path/to/workspace monitor --console
 - **Job Table**: Scrollable list of jobs with status indicators, filtered with
   [filter expressions](#job-filter-expressions) (`/`)
 - **Tree View**: Jobs grouped by status, task and/or tag (`t`)
-- **Job Details**: Process, carbon, tags, progress and the job dependencies with
-  their status (click a dependency to open its details)
+- **Job Details**: Process, carbon, tags, progress, the failure reason with
+  what happened (see below) and the job dependencies with their status and failure reason (click a dependency to
+  open its details)
 - **Live Logs**: Real-time log output panel
 - **Keyboard Navigation**: Navigate and interact using keyboard shortcuts
 - **Status Bar**: Shows experiment status and connection info
@@ -569,3 +574,22 @@ experimaestro experiments dag my_experiment --html dag.html
 ```
 
 See [Experiment DAG Visualization](cli.md#experiment-dag-visualization-experimaestro-dag) in the CLI reference for details and options.
+
+## Failure details
+
+The job details of both interfaces show what happened to a failed job, read
+from the `.failed` marker in the job folder:
+
+- for an exception raised by the task, its type and message
+  (e.g. `ValueError: the learning rate must be positive`) and where it was
+  raised (`file.py:42 in execute`) — the full traceback is in the job logs;
+- for a timeout, a cancellation or a crashed process, the recorded message;
+- for a job the launcher refused to start (e.g. a SLURM pending reason such as
+  `PartitionTimeLimit`) or stopped (e.g. the SLURM time limit), the reason
+  given by the launcher, followed by what the job reported (a job SLURM stops
+  at its time limit receives SIGTERM and reports it was cancelled: it is shown
+  as timed out, and a resumable task is retried);
+- the exit code of the job process.
+
+Jobs that failed with an older experimaestro only show their exit code. Over
+SSH, the details are read by the remote experimaestro, if recent enough.

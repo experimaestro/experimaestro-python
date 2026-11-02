@@ -75,6 +75,16 @@ class JobDetail:
     tags: dict[str, str] = field(default_factory=dict)
     #: Dependency job id -> lowercase state name (None when unknown)
     dependencies: dict[str, str | None] = field(default_factory=dict)
+    #: Failure reason (JobFailureStatus name) of an error state
+    failure: str | None = None
+    #: Failed dependency job id -> its failure reason
+    dependency_failures: dict[str, str] = field(default_factory=dict)
+    #: What happened (message of the .failed marker), None if not shown
+    failure_message: str | None = None
+    #: Where the exception was raised, None if not shown
+    failure_location: str | None = None
+    #: What the job reported, when the launcher explained the failure
+    failure_job_message: str | None = None
 
 
 @dataclass
@@ -165,6 +175,11 @@ class UIDriver(Protocol):
 
     async def job_detail(self, job_id: str) -> JobDetail:
         """Open the detail view of a job of the open experiment"""
+        ...
+
+    async def follow_dependency(self, job_id: str, dependency_id: str) -> JobDetail:
+        """Open the detail view of a job, then the one of a dependency through
+        its link"""
         ...
 
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:

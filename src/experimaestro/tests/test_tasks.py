@@ -25,6 +25,8 @@ from experimaestro import SubmitHook, Job, Launcher, LightweightTask
 
 from .utils import TemporaryDirectory, TemporaryExperiment, is_posix
 
+from experimaestro.scheduler.interfaces import FailureDetails
+
 from .tasks.all import (
     Concat,
     ForeignTaskA,
@@ -84,6 +86,16 @@ def test_fail_simple():
     with TemporaryExperiment("failing", timeout_multiplier=9) as xp:
         fail = Fail.C().submit()
         fail.touch()
+        assert fail.__xpm__.job.wait() == JobState.ERROR
+
+        # The exception, and where it was raised, are recorded for the job
+        # details (read before the temporary workspace is removed)
+        job = fail.__xpm__.job
+        details = FailureDetails.from_path(job.path, job.scriptname)
+        assert details.code == 1
+        assert details.message == "AssertionError: Failing"
+        assert details.location.endswith(" in execute")
+        assert "tasks/all.py:" in details.location
 
     assert xp.failed
     assert fail.__xpm__.job.state == JobState.ERROR

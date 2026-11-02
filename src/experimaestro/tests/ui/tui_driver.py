@@ -14,6 +14,7 @@ from textual.pilot import Pilot
 from textual.widgets import (
     DataTable,
     Input,
+    Label,
     RichLog,
     SelectionList,
     Static,
@@ -355,14 +356,27 @@ class TuiDriver:
         await self._select_row(self._table("#jobs-table"), job_id)
         await self.pilot.press("enter")
         await self.settle()
+        return self._read_job_detail(job_id)
+
+    async def follow_dependency(self, job_id: str, dependency_id: str) -> JobDetail:
+        await self.job_detail(job_id)
+        # As a click on the dependency
+        self.app.query_one(DependencyList).action_select_dependency(dependency_id)
+        await self.settle()
+        return self._read_job_detail(dependency_id)
+
+    def _read_job_detail(self, job_id: str) -> JobDetail:
         view = self.app.query_one(JobDetailView)
         job = view.job_data
         assert job is not None and job.identifier == job_id
         deps = self.app.query_one(DependencyList)
         dependencies = {}
+        dependency_failures = {}
         for dep_id in view.dependencies_map.get(job_id, []):
             _, state = view.jobs_info.get(dep_id, ("", None))
             dependencies[dep_id] = state.name.lower() if state else None
+            if state is not None and state.failure_reason is not None:
+                dependency_failures[dep_id] = state.failure_reason.name
         assert set(deps.task_ids) <= set(dependencies)
         return JobDetail(
             job_id=job.identifier,
@@ -370,7 +384,21 @@ class TuiDriver:
             state=job.state.name.lower(),
             tags=dict(view.tags_map.get(job_id, {})),
             dependencies=dependencies,
+            failure=job.state.failure_reason.name if job.state.failure_reason else None,
+            dependency_failures=dependency_failures,
+            failure_message=self._shown_failure(view, "message"),
+            failure_location=self._shown_failure(view, "location"),
+            failure_job_message=self._shown_failure(view, "job_message"),
         )
+
+    def _shown_failure(self, view: JobDetailView, name: str) -> str | None:
+        """A failure detail, if the failure section shows it"""
+        label = self.app.query_one("#job-failure-label", Label)
+        value = getattr(view.failure, name) if view.failure else None
+        if value is None or not label.display:
+            return None
+        assert value in str(label.render())
+        return value
 
     async def _open_log(self, job_id: str) -> LogViewerScreen:
         await self._show_jobs()

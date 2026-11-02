@@ -60,7 +60,7 @@ export default ({
 
         {/* Cells spanning the two lines of the job */}
         <td rowSpan={2} className="job-status">
-          <StatusBadge status={job.status} progress={progress} compact />
+          <StatusBadge status={job.status} progress={progress} compact failure={job} />
         </td>
         <td className="text-muted small text-nowrap">{formatShortDate(job.submitted)}</td>
         <td rowSpan={2} className="text-muted small text-nowrap">

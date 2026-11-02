@@ -5,7 +5,9 @@ import React from "react";
 import { Job } from "./reducers";
 import { ProgressBar } from "react-bootstrap";
 import { useMessages } from "./ui/messages";
-import { useAppSelector } from "./store";
+import { useAppSelector, useNavigate } from "./store";
+import { linkProps } from "./routes";
+import { StatusBadge } from "./StatusBadge";
 import Modal from "react-bootstrap/Modal";
 
 function formatms(t: undefined | string) {
@@ -51,29 +53,62 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
   const classes = useStyles();
   const { success, error } = useMessages();
   const allJobs = useAppSelector((state) => state.db.jobs);
+  const route = useAppSelector((state) => state.db.route);
+  const navigate = useNavigate();
 
   const carbon = job.carbon;
   const proc = job.process;
 
-  const dependencies = (job.dependsOn || []).map((depId) => {
-    const depJob = allJobs.byId[depId];
-    return {
-      jobId: depId,
-      taskId: depJob?.taskId || depId.substring(0, 12),
-      status: depJob?.status || "unknown",
-    };
-  });
+  // Dependencies, with their job when known (to show its state and link to it)
+  const dependencies = (job.dependsOn || []).map((depId) => ({
+    jobId: depId,
+    job: allJobs.byId[depId] as Job | undefined,
+  }));
 
   return (
     <div className={classes.details}>
           <span className={classes.what}>Status</span>
-          <div className="job-detail-status" data-status={job.status}>
+          <div
+            className="job-detail-status"
+            data-status={job.status}
+            data-failure={job.failureReason || undefined}
+          >
+            {job.failureIcon ? `${job.failureIcon} ` : ""}
             {job.status}
-            {job.failureReason ? ` (${job.failureReason})` : ""}
+            {job.failureReason
+              ? ` (${job.failureReason}: ${job.failureDescription || ""})`
+              : ""}
             {job.schedulerState && job.schedulerState !== job.status
               ? ` — scheduler: ${job.schedulerState}`
               : ""}
           </div>
+
+          {job.failure && (job.failure.message || job.failure.code !== null) && (
+            <>
+              <span className={classes.what}>Failure</span>
+              <div className="job-detail-failure">
+                {job.failure.message && (
+                  <div className="failure-message">{job.failure.message}</div>
+                )}
+                {job.failure.job_message && (
+                  <div className="failure-job-message small">
+                    the job reported: {job.failure.job_message}
+                  </div>
+                )}
+                <div className="text-muted small">
+                  {job.failure.location && (
+                    <span className="failure-location">
+                      raised at <code>{job.failure.location}</code>
+                    </span>
+                  )}
+                  {job.failure.location && job.failure.code !== null ? " — " : ""}
+                  {job.failure.code !== null && `exit code ${job.failure.code}`}
+                  {job.failure.message ? "" : " (no message recorded)"}
+                  {" — see the Logs tab for the full output"}
+                </div>
+              </div>
+            </>
+          )}
 
           <span className={classes.what}>Path</span>
           <div>
@@ -157,24 +192,52 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
             ))}
           </div>
 
-          {dependencies.length > 0 && (
-            <>
-              <span className={classes.what}>Dependencies</span>
-              <div className="dependencies">
-                {dependencies.map((dep) => (
-                  <span
-                    key={dep.jobId}
-                    data-job-id={dep.jobId}
-                    data-status={dep.status}
-                    className={`dependency status-${dep.status}`}
-                    title={`${dep.taskId} (${dep.status})`}
-                  >
-                    {dep.taskId.split(".").pop()}
+          <span className={classes.what}>Dependencies</span>
+          <div className="dependencies">
+            {dependencies.length === 0 && (
+              <span className="text-muted">(no dependencies)</span>
+            )}
+            {dependencies.map(({ jobId, job: dep }) => {
+              const status = dep?.status || "unknown";
+              const content = (
+                <>
+                  <StatusBadge status={status} compact failure={dep} />
+                  <span className="dependency-task">
+                    {dep ? dep.taskId.split(".").pop() : "?"}
                   </span>
-                ))}
-              </div>
-            </>
-          )}
+                  <code>{jobId.substring(0, 12)}</code>
+                  {dep && <span className="text-muted small">{dep.taskId}</span>}
+                </>
+              );
+              const attributes = {
+                className: "dependency",
+                "data-job-id": jobId,
+                "data-status": status,
+                "data-failure": dep?.failureReason || undefined,
+              };
+              // Opens the detail of the dependency (in place of this one)
+              return dep ? (
+                <a
+                  key={jobId}
+                  {...attributes}
+                  title={`Show the details of ${dep.taskId}/${jobId}`}
+                  {...linkProps(
+                    {
+                      ...route,
+                      job: { taskId: dep.taskId, jobId, tab: "details" },
+                    },
+                    navigate,
+                  )}
+                >
+                  {content}
+                </a>
+              ) : (
+                <span key={jobId} {...attributes}>
+                  {content}
+                </span>
+              );
+            })}
+          </div>
 
           {job.progress && job.progress.length > 0 && (
             <>

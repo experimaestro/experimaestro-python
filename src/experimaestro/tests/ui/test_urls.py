@@ -12,7 +12,14 @@ from starlette.testclient import TestClient
 
 from experimaestro.webui.app import create_app
 
-from .scenario import EVAL_DONE, LEARN_DONE, OLD_LEARN
+from .scenario import (
+    EVAL_DEP_FAILED,
+    EVAL_DONE,
+    LEARN_DONE,
+    LEARN_FAILED,
+    LEARN_TIMEOUT,
+    OLD_LEARN,
+)
 from .web_driver import TOKEN
 
 
@@ -93,7 +100,12 @@ async def test_url_follows_the_view(ui):
 async def test_open_a_run_from_its_url(ui):
     await ui.page.goto(f"{ui.url}/xps/baseline/jobs?run=20260101_100000")
     await ui.settle()
-    assert await ui.visible_jobs() == {OLD_LEARN}
+    assert await ui.visible_jobs() == {
+        OLD_LEARN,
+        LEARN_FAILED,
+        EVAL_DEP_FAILED,
+        LEARN_TIMEOUT,
+    }
 
     await ui.page.goto(f"{ui.url}/xps/baseline")
     await ui.settle()

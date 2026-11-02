@@ -84,6 +84,11 @@ export type Job = {
   submitted: string;
 
   failureReason?: string | null;
+  // Icon of the failure reason (as in the TUI) and its description
+  failureIcon?: string | null;
+  failureDescription?: string | null;
+  // What happened, from the .failed marker (sent with the job details only)
+  failure?: FailureDetails | null;
   exitCode?: number | null;
   retryCount?: number;
 
@@ -101,6 +106,17 @@ export type Job = {
   experimentIds?: Array<string>; // Jobs can belong to multiple experiments
   dependsOn?: Array<string>; // Job IDs this job depends on
   runId?: string;
+};
+
+export type FailureDetails = {
+  code: number | null;
+  // e.g. "ValueError: bad input", or the reason given by the launcher
+  message: string | null;
+  // Where the exception was raised, e.g. "task.py:12 in execute"
+  location: string | null;
+  // What the job recorded, when the launcher explained the failure better
+  // (e.g. "Job terminated by SIGTERM" for a SLURM timeout)
+  job_message?: string | null;
 };
 
 export type Jobs = {

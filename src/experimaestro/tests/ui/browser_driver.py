@@ -387,11 +387,33 @@ class BrowserDriver:
         return value
 
     async def job_detail(self, job_id: str) -> JobDetail:
+        await self._open_job_detail(job_id)
+        detail = await self._read_job_detail(job_id)
+        await self._close_modals()
+        return detail
+
+    async def follow_dependency(self, job_id: str, dependency_id: str) -> JobDetail:
+        modal = await self._open_job_detail(job_id)
+        await modal.locator(f"a.dependency[data-job-id='{dependency_id}']").click()
+        # The route of the dependency's detail (.../<task>/<job>[?run=...])
+        await self.page.wait_for_function(
+            "id => window.location.pathname.endsWith('/' + id)", arg=dependency_id
+        )
+        await self.settle()
+        detail = await self._read_job_detail(dependency_id)
+        await self._close_modals()
+        return detail
+
+    async def _open_job_detail(self, job_id: str) -> Locator:
         await self._close_modals()
         await self._job_row(job_id).locator("i[title='Details']").click()
         modal = self.page.locator(".modal.show")
         await modal.wait_for()
         await self.settle()
+        return modal
+
+    async def _read_job_detail(self, job_id: str) -> JobDetail:
+        modal = self.page.locator(".modal.show")
         status = modal.locator(".job-detail-status")
         tags = {}
         for tag in await modal.locator(".job-detail-tags .tag").all():
@@ -399,20 +421,35 @@ class BrowserDriver:
                 ".value"
             ).inner_text()
         dependencies = {}
+        dependency_failures = {}
         for dep in await modal.locator(".dependency[data-job-id]").all():
+            dep_id = await dep.get_attribute("data-job-id")
             state = await dep.get_attribute("data-status")
-            dependencies[await dep.get_attribute("data-job-id")] = (
-                None if state == "unknown" else state
-            )
-        detail = JobDetail(
+            dependencies[dep_id] = None if state == "unknown" else state
+            if failure := await dep.get_attribute("data-failure"):
+                dependency_failures[dep_id] = failure
+        return JobDetail(
             job_id=job_id,
             task_id=(await modal.locator(".modal-title").inner_text()).strip(),
             state=await status.get_attribute("data-status"),
             tags=tags,
             dependencies=dependencies,
+            failure=await status.get_attribute("data-failure"),
+            dependency_failures=dependency_failures,
+            failure_message=await self._text_or_none(modal, ".failure-message"),
+            failure_location=await self._text_or_none(modal, ".failure-location code"),
+            failure_job_message=await self._job_message(modal),
         )
-        await self._close_modals()
-        return detail
+
+    @classmethod
+    async def _job_message(cls, modal: Locator) -> str | None:
+        text = await cls._text_or_none(modal, ".failure-job-message")
+        return text.removeprefix("the job reported: ") if text else None
+
+    @staticmethod
+    async def _text_or_none(container: Locator, selector: str) -> str | None:
+        locator = container.locator(selector)
+        return await locator.inner_text() if await locator.count() else None
 
     async def _open_log(self, job_id: str) -> Locator:
         await self._close_modals()

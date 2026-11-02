@@ -11,6 +11,7 @@ directory, so that deleting a job, reading its logs or measuring a folder go
 through the real code.
 """
 
+import json
 import threading
 import time
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from pathlib import Path
 from experimaestro.scheduler.interfaces import (
     ExperimentJobInformation,
     ExperimentStatus,
+    JobFailureStatus,
     JobState,
 )
 from experimaestro.scheduler.services import WebService
@@ -45,6 +47,10 @@ class JobSpec:
     depends_on: list[str] = field(default_factory=list)
     #: Submission order (seconds after the run started)
     submitted: int = 0
+    #: Failure reason of an error state (JobFailureStatus name)
+    failure: str | None = None
+    #: Content of the ``.failed`` marker (None: not written)
+    failed_marker: dict | None = None
 
     @property
     def scriptname(self) -> str:
@@ -74,6 +80,25 @@ class ExperimentSpec:
 LEARN_DONE = "a1learndone"
 LEARN_ERROR = "a2learnerror"
 EVAL_DONE = "a3evaldone"
+LEARN_FAILED = "a5learnfailed"
+#: The .failed marker of LEARN_FAILED, as the job process writes it
+LEARN_FAILED_MARKER = {
+    "code": 1,
+    "reason": "failed",
+    "message": "ValueError: the learning rate must be positive",
+    "location": "pkg/learn.py:42 in execute",
+}
+#: Stopped by SLURM at its time limit (the job wrote it was cancelled)
+LEARN_TIMEOUT = "a7learntimeout"
+#: Its .failed marker, as rewritten by the scheduler
+LEARN_TIMEOUT_MARKER = {
+    "code": 143,
+    "reason": "timeout",
+    "message": "SLURM job time limit reached",
+    "job": {"code": 15, "reason": "cancelled", "message": "Job terminated by SIGTERM"},
+}
+#: Failed because its dependency (LEARN_FAILED) failed
+EVAL_DEP_FAILED = "a6evaldepfailed"
 OLD_LEARN = "a0oldlearn"
 LEARN_RUNNING = "b1learnrunning"
 EVAL_WAITING = "b2evalwaiting"
@@ -95,8 +120,40 @@ EXPERIMENTS = [
         [
             RunSpec(
                 "20260101_100000",
-                ExperimentStatus.DONE,
-                [JobSpec(OLD_LEARN, "pkg.Learn", "done", {"model": "bm25"})],
+                ExperimentStatus.FAILED,
+                [
+                    JobSpec(OLD_LEARN, "pkg.Learn", "done", {"model": "bm25"}),
+                    # A genuine failure, and the failure of a job depending on it
+                    JobSpec(
+                        LEARN_FAILED,
+                        "pkg.Learn",
+                        "error",
+                        {"model": "bm25"},
+                        [],
+                        1,
+                        "FAILED",
+                        LEARN_FAILED_MARKER,
+                    ),
+                    JobSpec(
+                        EVAL_DEP_FAILED,
+                        "pkg.Evaluate",
+                        "error",
+                        {"model": "bm25"},
+                        [LEARN_FAILED],
+                        2,
+                        "DEPENDENCY",
+                    ),
+                    JobSpec(
+                        LEARN_TIMEOUT,
+                        "pkg.Learn",
+                        "error",
+                        {"model": "bm25"},
+                        [],
+                        3,
+                        "TIMEOUT",
+                        LEARN_TIMEOUT_MARKER,
+                    ),
+                ],
             ),
             RunSpec(
                 "20260102_090000",
@@ -267,11 +324,16 @@ class ScenarioProvider(OfflineStateProvider):
         path.mkdir(parents=True, exist_ok=True)
         (path / f"{spec.scriptname}.out").write_text(stdout_text(spec.identifier))
         (path / f"{spec.scriptname}.err").write_text(stderr_text(spec.identifier))
+        if spec.failed_marker is not None:
+            (path / f"{spec.scriptname}.failed").write_text(
+                json.dumps(spec.failed_marker)
+            )
         job = MockJob(
             identifier=spec.identifier,
             task_id=spec.task_id,
             path=path,
             state=spec.state,
+            failure_reason=JobFailureStatus[spec.failure] if spec.failure else None,
             starttime=None,
             endtime=None,
             progress=[],

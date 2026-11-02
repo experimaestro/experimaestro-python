@@ -437,3 +437,30 @@ def test_field_names_and_load_objects_missing_defaults():
     # In-place mutations on default containers work as expected
     inst.items.append("test")
     assert inst.items == ["test"]
+
+
+class ValidateParent(Config):
+    pass
+
+
+class ValidateChild(ValidateParent):
+    x: Param[int]
+
+    def __validate__(self):
+        if self.x < 0:
+            raise ValueError(f"x must be >= 0, got {self.x}")
+
+
+class ValidateGrandChild(ValidateChild):
+    y: Param[int]
+
+
+def test_validate_in_multilevel_hierarchy():
+    """__validate__ defined below the first Config subclass is called (#312)"""
+    with pytest.raises(ValueError, match="x must be >= 0"):
+        ValidateChild.C(x=-1).__xpm__.validate()
+    with pytest.raises(ValueError, match="x must be >= 0"):
+        ValidateGrandChild.C(x=-1, y=0).__xpm__.validate()
+
+    ValidateChild.C(x=1).__xpm__.validate()
+    ValidateParent.C().__xpm__.validate()

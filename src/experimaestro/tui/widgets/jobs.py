@@ -15,8 +15,8 @@ from textual.binding import Binding
 from rich.text import Text
 
 from experimaestro.cli.filter import FILTER_SYNTAX_HINT, FilterContext, createFilter
-from experimaestro.scheduler.interfaces import JobState
-from experimaestro.scheduler.job_status import status_rank
+from experimaestro.scheduler.interfaces import FailureDetails, JobState
+from experimaestro.scheduler.job_status import failure_description, status_rank
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
@@ -213,6 +213,8 @@ class DependencyList(Static):
             short_id = f"{dep_job_id[:8]}..."
             if dep_state is not None:
                 state_text = f"{dep_state.icon} {dep_state.name.lower():<8}"
+                if dep_state.failure_reason is not None:
+                    state_text += f" ({failure_description(dep_state)})"
             else:
                 state_text = f"❓ {'unknown':<8}"
             if dep_task_id:
@@ -248,11 +250,15 @@ class JobDetailView(Widget):
         self.current_job_id: str | None = None
         self.current_task_id: str | None = None
         self.current_experiment_id: str | None = None
+        #: Run the job is shown from (None: the current run)
+        self.current_run_id: str | None = None
         self.job_data: dict | None = None
         self.tags_map: dict[str, dict[str, str]] = {}  # job_id -> {tag_key: tag_value}
         self.dependencies_map: dict[
             str, list[str]
         ] = {}  # job_id -> [depends_on_job_ids]
+        #: Failure details of the displayed job (from its .failed marker)
+        self.failure: FailureDetails | None = None
         # Mapping from job_id to (task_id, state) for dependencies lookup
         self.jobs_info: dict[str, tuple[str, JobState | None]] = {}
         self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
@@ -268,6 +274,8 @@ class JobDetailView(Widget):
             yield Label("", id="job-status-label")
             yield Label("", id="job-path-label")
             yield Label("", id="job-times-label")
+            yield Label("Failure:", id="job-failure-title", classes="subsection-title")
+            yield Label("", id="job-failure-label")
             yield Label("Process:", classes="subsection-title")
             yield Label("", id="job-process-label")
             yield Label("Carbon Impact:", classes="subsection-title")
@@ -293,6 +301,28 @@ class JobDetailView(Widget):
         """Inspect job parameters with TUI inspector"""
         if self.job_data:
             self.post_message(InspectJobParams(self.job_data))
+
+    def _get_failure_info(self) -> Text | None:
+        """What happened to a failed job (None if nothing was recorded)"""
+        failure = self.failure
+        if failure is None or (failure.message is None and failure.code is None):
+            return None
+        text = Text()
+        if failure.message:
+            text.append(failure.message, style="bold red")
+            text.append("\n")
+        if failure.job_message:
+            text.append(f"the job reported: {failure.job_message}\n")
+        details = []
+        if failure.location:
+            details.append(f"raised at {failure.location}")
+        if failure.code is not None:
+            details.append(f"exit code {failure.code}")
+        if not failure.message:
+            details.append("no message recorded")
+        details.append("full output in the logs (l)")
+        text.append(" — ".join(details), style="dim")
+        return text
 
     def _get_process_info(self, job) -> str:
         """Get process information for a job using the state provider"""
@@ -361,11 +391,23 @@ class JobDetailView(Widget):
 
         return " | ".join(parts)
 
-    def set_job(self, job_id: str, task_id: str, experiment_id: str) -> None:
-        """Set the job to display"""
+    def set_job(
+        self,
+        job_id: str,
+        task_id: str,
+        experiment_id: str,
+        run_id: str | None = None,
+    ) -> None:
+        """Set the job to display
+
+        Args:
+            run_id: Run of the experiment the job is shown from, whose tags
+                and dependencies are displayed (None: the current run)
+        """
         self.current_job_id = job_id
         self.current_task_id = task_id
         self.current_experiment_id = experiment_id
+        self.current_run_id = run_id
 
         # Show loading for remote
         if self.state_provider.is_remote:
@@ -379,21 +421,32 @@ class JobDetailView(Widget):
         self, job_id: str, task_id: str, experiment_id: str, refresh: bool = False
     ) -> None:
         """Load job details in background thread"""
-        # Load tags and dependencies if needed
-        tags_map = self.state_provider.get_tags_map(experiment_id, refresh=refresh)
+        # Tags and dependencies of the job in the displayed run
+        run_id = self.current_run_id
+        tags_map = self.state_provider.get_tags_map(
+            experiment_id, run_id, refresh=refresh
+        )
         deps_map = self.state_provider.get_dependencies_map(
-            experiment_id, refresh=refresh
+            experiment_id, run_id, refresh=refresh
         )
         experiment_job_info = self.state_provider.get_experiment_job_info(
-            experiment_id, refresh=refresh
+            experiment_id, run_id, refresh=refresh
         )
 
-        # Load all jobs for the experiment to build the job_id -> (task_id,
-        # state) mapping used to display dependencies
-        jobs = self.state_provider.get_jobs(experiment_id, refresh=refresh)
+        # Load all jobs of the run to build the job_id -> (task_id, state)
+        # mapping used to display dependencies
+        jobs = self.state_provider.get_jobs(
+            experiment_id, run_id=run_id, refresh=refresh
+        )
         jobs_info = {j.identifier: (j.task_id or "", j.state) for j in jobs}
 
         job = self.state_provider.get_job(task_id, job_id, refresh=refresh)
+        failure = None
+        if job is not None:
+            try:
+                failure = self.state_provider.get_failure_details(job)
+            except Exception:
+                self.log.warning(f"Could not read the failure of {job_id}")
 
         self.app.call_from_thread(
             self._on_job_loaded,
@@ -402,6 +455,7 @@ class JobDetailView(Widget):
             deps_map,
             jobs_info,
             experiment_job_info,
+            failure,
         )
 
     def _on_job_loaded(
@@ -411,9 +465,11 @@ class JobDetailView(Widget):
         deps_map: dict,
         jobs_info: dict,
         experiment_job_info: dict = None,
+        failure: FailureDetails | None = None,
     ) -> None:
         """Handle loaded job on main thread"""
         self.query_one("#job-detail-loading", Static).add_class("hidden")
+        self.failure = failure
         self.tags_map = tags_map
         self.dependencies_map = deps_map
         self.jobs_info = jobs_info
@@ -452,7 +508,7 @@ class JobDetailView(Widget):
         status_text = f"{status_icon} {status_name}"
         failure_reason = job.state.failure_reason if job.state else None
         if failure_reason:
-            status_text += f" ({failure_reason.name})"
+            status_text += f" ({failure_reason.name}: {failure_description(job.state)})"
 
         self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
 
@@ -500,6 +556,12 @@ class JobDetailView(Widget):
                 times_text += f" | Last check: {ago}s ago"
 
         self.query_one("#job-times-label", Label).update(times_text)
+
+        # Failure details (only for a job that failed)
+        failure_text = self._get_failure_info()
+        for widget_id in ("#job-failure-title", "#job-failure-label"):
+            self.query_one(widget_id, Label).display = failure_text is not None
+        self.query_one("#job-failure-label", Label).update(failure_text or "")
 
         # Process information
         process_text = self._get_process_info(job)

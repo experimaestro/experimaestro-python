@@ -18,7 +18,7 @@ The core classes form the foundation of experimaestro's configuration and task s
 
 ```{eval-rst}
 .. autoclass:: experimaestro.core.objects.ConfigMixin
-   :members: add_dependencies, copy, copy_dependencies, instance, tag, tags, submit, wait, __validate__, __identifier__
+   :members: add_dependencies, copy, copy_dependencies, instance, tag, tags, submit, wait, __identifier__
 ```
 
 ### Task

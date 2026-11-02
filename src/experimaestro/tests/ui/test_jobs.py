@@ -3,10 +3,15 @@
 import pytest
 
 from .scenario import (
+    EVAL_DEP_FAILED,
     EVAL_DONE,
     EVAL_WAITING,
     LEARN_DONE,
     LEARN_ERROR,
+    LEARN_FAILED,
+    LEARN_FAILED_MARKER,
+    LEARN_TIMEOUT,
+    LEARN_TIMEOUT_MARKER,
     LEARN_RUNNING,
     LEARN_STUCK,
     OLD_LEARN,
@@ -127,7 +132,12 @@ async def test_run_history(ui):
     assert await ui.runs("baseline") == ["20260101_100000", "20260102_090000"]
 
     await ui.open_experiment("baseline", "20260101_100000")
-    assert await ui.visible_jobs() == {OLD_LEARN}
+    assert await ui.visible_jobs() == {
+        OLD_LEARN,
+        LEARN_FAILED,
+        EVAL_DEP_FAILED,
+        LEARN_TIMEOUT,
+    }
 
 
 async def test_filter_by_tag_and_state(ui):
@@ -227,6 +237,45 @@ async def test_job_detail_dependency_state(ui):
     detail = await ui.job_detail(EVAL_WAITING)
     assert detail.state == "waiting"
     assert detail.dependencies == {LEARN_RUNNING: "running"}
+
+
+async def test_job_detail_failure_reason(ui):
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.job_detail(LEARN_FAILED)
+    assert (detail.state, detail.failure) == ("error", "FAILED")
+
+    detail = await ui.job_detail(EVAL_DEP_FAILED)
+    assert (detail.state, detail.failure) == ("error", "DEPENDENCY")
+    assert detail.dependencies == {LEARN_FAILED: "error"}
+    assert detail.dependency_failures == {LEARN_FAILED: "FAILED"}
+    # No marker: nothing more than the reason
+    assert detail.failure_message is None
+
+
+async def test_job_detail_failure_details(ui):
+    # What happened, as recorded in the .failed marker
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.job_detail(LEARN_FAILED)
+    assert detail.failure_message == LEARN_FAILED_MARKER["message"]
+    assert detail.failure_location == LEARN_FAILED_MARKER["location"]
+    assert detail.failure_job_message is None
+
+
+async def test_job_detail_launcher_failure(ui):
+    # The reason given by the launcher, and what the job itself reported
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.job_detail(LEARN_TIMEOUT)
+    assert (detail.state, detail.failure) == ("error", "TIMEOUT")
+    assert detail.failure_message == LEARN_TIMEOUT_MARKER["message"]
+    assert detail.failure_job_message == LEARN_TIMEOUT_MARKER["job"]["message"]
+
+
+async def test_job_detail_follow_dependency(ui):
+    # From a job failed because of a dependency to the source of the failure
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.follow_dependency(EVAL_DEP_FAILED, LEARN_FAILED)
+    assert detail.task_id == "pkg.Learn"
+    assert (detail.state, detail.failure) == ("error", "FAILED")
 
 
 async def test_job_logs(ui):

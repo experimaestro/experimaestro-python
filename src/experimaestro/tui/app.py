@@ -671,7 +671,12 @@ class ExperimaestroUI(App):
 
         # Set the job to display
         job_detail_view = self.query_one(JobDetailView)
-        job_detail_view.set_job(message.job_id, message.task_id, message.experiment_id)
+        job_detail_view.set_job(
+            message.job_id,
+            message.task_id,
+            message.experiment_id,
+            self.query_one(JobsTable).current_run_id,
+        )
 
     def on_job_deselected(self, message: JobDeselected) -> None:
         """Handle job deselection - go back to jobs view"""

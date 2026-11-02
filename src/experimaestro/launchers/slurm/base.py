@@ -630,7 +630,9 @@ class BatchSlurmProcess(Process):
         # Check if this was a SLURM timeout
         if self._last_state and self._last_state.slurm_state == "TIMEOUT":
             logger.info("SLURM job %s timed out", self.jobid)
-            return JobStateError(JobFailureStatus.TIMEOUT)
+            return JobStateError(
+                JobFailureStatus.TIMEOUT, message="SLURM job time limit reached"
+            )
 
         # Check if job was rejected due to fatal pending reason
         if self._last_state and (
@@ -642,7 +644,10 @@ class BatchSlurmProcess(Process):
                 self._last_state.reason,
                 failure_status.name,
             )
-            return JobStateError(failure_status)
+            return JobStateError(
+                failure_status,
+                message=f"Rejected by SLURM (reason: {self._last_state.reason})",
+            )
 
         return JobState.ERROR
 
