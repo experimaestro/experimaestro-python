@@ -216,3 +216,58 @@ class MyHFHub(ExperimaestroHFHub):
   (default: `"experimaestro.json"`, with fallback to `"definition.json"` on load)
 - `serialization_context_class`: The `SerializationContext` class used during
   serialization (default: `SerializationContext`)
+
+
+## Visualizing Serialized Artifacts & Model DAGs
+
+Any serialized Experimaestro object—whether saved locally with {py:func}`~experimaestro.save`,
+exported to a directory, or published to the Hugging Face Hub via
+{py:class}`~experimaestro.huggingface.ExperimaestroHFHub`—can be inspected and visualized
+as an interactive DAG using the `dag` command without requiring an active workspace or scheduler:
+
+```bash
+# Visualize a local model directory in the browser
+experimaestro dag /path/to/exported_model/
+
+# Visualize a model directly from Hugging Face Hub
+experimaestro dag xpmir/Mice-P-61m
+
+# Export a standalone, self-contained HTML visualizer
+experimaestro dag xpmir/Mice-P-61m --html mice_dag.html
+
+# Generate a Mermaid flowchart directly for GitHub READMEs or HF Model Cards
+experimaestro dag xpmir/Mice-P-61m --mermaid -
+experimaestro dag ./my_model/ --mermaid README.md
+```
+
+### Graph Reconstruction & Deliverables
+
+When visualizing serialized artifacts:
+- **Task Stubs**: Tasks saved without their full run history are automatically detected
+  and rendered as stubs (e.g., `Learner (stub)`).
+- **Init Tasks & Dependencies**: Dependencies defined via initialization tasks (`init_tasks`)
+  are automatically traversed to restore pipeline lineage.
+- **Deliverable Promotion**: Terminal configuration objects (such as model loaders or checkpoints
+  with no downstream dependents) are promoted to terminal deliverable actions in task views,
+  ensuring clear end-to-end visualization (e.g. `Learner -> SimpleModuleLoader`).
+
+### Python API
+
+You can also construct DAG states and export diagrams programmatically in Python:
+
+```python
+from experimaestro.ui.graph import (
+    load_serialized_graph,
+    standalone_html,
+    to_mermaid,
+)
+
+# Load a serialized graph from a file, directory, or Hugging Face Hub ID
+state = load_serialized_graph("xpmir/Mice-P-61m")
+
+# Generate Mermaid flowchart markdown
+mermaid_md = to_mermaid(state)
+
+# Generate standalone self-contained HTML
+html_content = standalone_html(state, title="Mice Model DAG")
+```
