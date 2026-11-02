@@ -108,13 +108,15 @@ class LogWidget(Vertical):
 
     @work(thread=True, group="log-read")
     def _read_new(self) -> None:
-        generation = self.log_file.generation
+        tails = self.log_file.tails
         try:
             lines, partial = self.log_file.read_new_content()
         except Exception as e:
             self._call(self._done, e)
             return
-        self._call(self._apply, generation != self.log_file.generation, lines, partial)
+        # The end of the log was read again (file replaced, too much new
+        # content, or lines shown as completed were rewritten)
+        self._call(self._apply, tails != self.log_file.tails, lines, partial)
 
     @work(thread=True, group="log-read")
     def _read_earlier(self) -> None:

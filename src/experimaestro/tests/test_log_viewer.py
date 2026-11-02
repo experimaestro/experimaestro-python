@@ -133,7 +133,11 @@ def test_log_file_progress_ending_with_cr(tmp_path):
     assert reader.read_new_content() == ([], " 20%")
     with log.open("a", newline="") as out:
         out.write("\n")
-    assert reader.read_new_content() == ([" 20%"], "")
+    # Kept pending until another line (progress bars can go back to it)
+    assert reader.read_new_content() == ([], " 20%\n")
+    with log.open("a", newline="") as out:
+        out.write("done\n")
+    assert reader.read_new_content() == ([" 20%", "done"], "")
 
 
 def test_render_terminal_cursor_up():
@@ -193,3 +197,68 @@ def test_log_file_nested_progress(tmp_path):
     with log.open("a", newline="") as out:
         out.write("\n\ndone\n")
     assert reader.read_new_content() == (["", "Epoch: 20%", "done"], "")
+
+
+def _nested_tqdm_writes() -> list[str]:
+    """The writes of nested tqdm bars (each flushed on its own): the inner bar
+    is drawn on the next line (``\\n``, bar, ``ESC[A``), the outer one is
+    rewritten in place, a log line is printed in between"""
+    writes = ["start\n", "\router: 0/3"]
+    for epoch in range(3):
+        for step in range(2):
+            writes += ["\n", f"\rinner {epoch}: {step}/2", "\x1b[A"]
+        writes += ["\n", "\r\x1b[K", "\x1b[A"]
+        writes.append(f"\router: {epoch + 1}/3")
+        if epoch == 0:
+            writes.append("INFO: logged\n")
+    return writes + ["\n", "done\n"]
+
+
+def test_read_log_slice_nested_progress_cut_anywhere(tmp_path):
+    """Polling between any two writes of nested bars shows each line once"""
+    log = tmp_path / "task.err"
+    log.write_bytes(b"")
+    writes = _nested_tqdm_writes()
+    expected, pending, _ = render_terminal("".join(writes).encode())
+    shown, partial, offset = "", "", None
+    for write in writes:
+        with log.open("a", newline="") as out:
+            out.write(write)
+        poll = read_log_slice(log, offset)
+        shown = poll["content"] if poll["tail"] else shown + poll["content"]
+        partial, offset = poll["partial"], poll["offset"]
+    assert (shown + partial).split("\n") == expected + pending
+
+
+def test_log_file_nested_progress_cut_anywhere(tmp_path):
+    """The TUI reader shows each line of nested bars once"""
+    log = tmp_path / "task.err"
+    log.write_bytes(b"")
+    writes = _nested_tqdm_writes()
+    expected, pending, _ = render_terminal("".join(writes).encode())
+    reader = LogFile(str(log))
+    shown, partial = reader.read_tail()
+    for write in writes:
+        with log.open("a", newline="") as out:
+            out.write(write)
+        lines, partial = reader.read_new_content()
+        shown += lines
+    assert shown + partial.split("\n") == expected + pending
+
+
+def test_render_terminal_crlf_lines_are_completed():
+    """Lines ending with ``\\r\\n`` are not progress bars"""
+    assert render_terminal(b"one\r\ntwo\r\n") == (["one", "two"], [""], 10)
+
+
+def test_read_log_slice_rereads_tail_when_completed_lines_rewritten(tmp_path):
+    """A poll going back up to lines already sent as completed reads the end
+    of the log again (the client replaces what it shows)"""
+    log = tmp_path / "task.err"
+    log.write_bytes(b"start\nouter: 1\ninner")
+    offset = len(b"start\nouter: 1\n")
+    with log.open("a", newline="") as out:
+        out.write("\x1b[A\router: 2")
+    poll = read_log_slice(log, offset)
+    assert poll["tail"]
+    assert (poll["content"], poll["partial"]) == ("start\n", "outer: 2\ninner")

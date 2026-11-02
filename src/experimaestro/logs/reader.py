@@ -27,6 +27,8 @@ MAX_FORWARD_SIZE = 1024 * 1024
 #: Beyond this size, the lines the cursor can go back to are no longer
 #: re-read (they are shown as completed lines)
 MAX_PENDING_SIZE = 256 * 1024
+#: Progress bar lines above the cursor kept pending (nested bars)
+MAX_PENDING_BARS = 8
 
 
 def apply_carriage_returns(line: str) -> str:
@@ -62,20 +64,39 @@ class _Screen:
         self.rows: list[str] = [""]
         #: Byte offset where the cursor first entered each row
         self.starts: list[int] = [0]
+        #: Whether each row was rewritten (progress bars start with ``\r``)
+        self.rewritten: list[bool] = [False]
+        #: The cursor tried to go above the first row: the data starts below
+        #: lines it rewrites
+        self.clamped = False
+        #: The cursor went back to the start of the line (``\r``)
+        self.returned = False
+        #: Size of the data rendered
+        self.size = 0
         self.row = 0
         self.col = 0
+        #: The top row the cursor went back up to since the last new row:
+        #: progress bars go back there (nested tqdm bars move down to draw
+        #: the inner bars and back up), so rows from there are still pending
+        #: even when the data ends while the cursor is below
+        self.top: int | None = None
 
     def newline(self, offset: int) -> None:
         self.row += 1
         self.col = 0
+        self.returned = False
         if self.row == len(self.rows):
             self.rows.append("")
             self.starts.append(offset)
+            self.rewritten.append(False)
+            self.top = None
 
     def write(self, text: str) -> None:
         """Write at the cursor; the end of the row is cleared (progress bars
         rewrite whole lines)"""
         if text:
+            # Text written after ``\r`` rewrites the line (not ``\r\n``)
+            self.rewritten[self.row] |= self.returned
             self.rows[self.row] = self.rows[self.row][: self.col].ljust(self.col) + text
             self.col += len(text)
 
@@ -83,6 +104,7 @@ class _Screen:
         sequence = match.group(0)
         if sequence == "\r":
             self.col = 0
+            self.returned = True
         elif sequence == "\b":
             self.col = max(0, self.col - 1)
         elif final := match.group(2):
@@ -90,7 +112,10 @@ class _Screen:
             n = int(params) if params.isdigit() else 0
             match final:
                 case "A" | "F":
+                    self.clamped |= self.row < max(n, 1)
                     self.row = max(0, self.row - max(n, 1))
+                    self.rewritten[self.row] = True
+                    self.top = self.row if self.top is None else min(self.top, self.row)
                 case "B" | "E":
                     self.row = min(len(self.rows) - 1, self.row + max(n, 1))
                 case "C":
@@ -121,6 +146,18 @@ class _Screen:
         self.write(text[position:])
 
 
+def _render_screen(data: bytes) -> _Screen:
+    screen = _Screen()
+    start = 0
+    for index, segment in enumerate(data.split(b"\n")):
+        if index:
+            screen.newline(start)
+        screen.feed(segment.decode(errors="replace"))
+        start += len(segment) + 1
+    screen.size = len(data)
+    return screen
+
+
 def render_terminal(data: bytes) -> tuple[list[str], list[str], int]:
     """Render log data as a terminal would show it
 
@@ -129,16 +166,20 @@ def render_terminal(data: bytes) -> tuple[list[str], list[str], int]:
     progress bars rewrite) and the byte offset where the pending lines start
     (rendering again from there gives them with their next updates).
     """
-    screen = _Screen()
-    start = 0
-    for index, segment in enumerate(data.split(b"\n")):
-        if index:
-            screen.newline(start)
-        screen.feed(segment.decode(errors="replace"))
-        start += len(segment) + 1
+    return _pending(_render_screen(data))
 
-    row = screen.row
-    if len(data) - screen.starts[row] > MAX_PENDING_SIZE:
+
+def _pending(screen: _Screen) -> tuple[list[str], list[str], int]:
+    """Split the rows of a screen into completed and pending ones"""
+    data_size = screen.size
+    row = screen.row if screen.top is None else min(screen.row, screen.top)
+    # The progress bars just above (the cursor can be between the lines of
+    # nested bars, e.g. after the ``\n`` going to an inner bar)
+    for _ in range(MAX_PENDING_BARS):
+        if row == 0 or not screen.rewritten[row - 1]:
+            break
+        row -= 1
+    if data_size - screen.starts[row] > MAX_PENDING_SIZE:
         # Too much to read again: only the last line stays pending
         row = len(screen.rows) - 1
     return screen.rows[:row], screen.rows[row:], screen.starts[row]
@@ -179,9 +220,10 @@ class LogFile:
 
     The end of the log is read first (:meth:`read_tail`), then its new content
     (:meth:`read_new_content`) or its earlier one (:meth:`read_before`). When
-    the file is replaced (see :attr:`LogSource.generation`), its end is read
-    again: readers compare :attr:`generation` before and after reading to
-    know that the lines they show are stale.
+    the file is replaced (see :attr:`LogSource.generation`), or when lines
+    returned as completed are rewritten, its end is read again: readers
+    compare :attr:`tails` before and after reading to know that the lines they
+    show are stale.
     """
 
     def __init__(self, source: LogSource | Path | str):
@@ -194,14 +236,17 @@ class LogFile:
         self.start = 0
         self._size: int | None = None
         self._partial = ""
+        #: Incremented each time the end of the log is read again: what was
+        #: shown is to be replaced
+        self.tails = 0
 
     @property
     def exists(self) -> bool:
         """Whether the log file existed when last read"""
         return self._size is not None
 
-    def _render(self, data: bytes) -> tuple[list[str], str]:
-        completed, pending, offset = render_terminal(data)
+    def _render(self, screen: _Screen) -> tuple[list[str], str]:
+        completed, pending, offset = _pending(screen)
         self.position += offset
         self._partial = "\n".join(pending)
         return completed, self._partial
@@ -214,6 +259,7 @@ class LogFile:
         bars), joined with ``\\n``, and may be empty.
         """
         self.source.touch()
+        self.tails += 1
         size = self._size = self.source.size()
         self.generation = self.source.generation
         self._partial = ""
@@ -222,7 +268,7 @@ class LogFile:
             return [], ""
         data, self.start = _tail(self.source, size, max_bytes)
         self.position = self.start
-        return self._render(data)
+        return self._render(_render_screen(data))
 
     def read_new_content(self) -> tuple[list[str], str]:
         """Read the new content of the log
@@ -230,8 +276,9 @@ class LogFile:
         Returns ``(new_complete_lines, partial)``. ``partial`` holds the lines
         still being written (which may have changed even when no new complete
         lines were produced). Reads the end of the log again (see
-        :meth:`read_tail`) when the file was replaced, or when there is too
-        much new content.
+        :meth:`read_tail`) when the file was replaced, when there is too
+        much new content, or when it rewrites lines already returned as
+        completed (see :attr:`tails`).
         """
         size = self.source.size()
         if (
@@ -242,8 +289,12 @@ class LogFile:
         if size == self._size or size is None:
             self._size = size
             return [], self._partial
+        screen = _render_screen(self.source.read(self.position, size - self.position))
+        if screen.clamped:
+            # Goes back to lines already shown as completed: read again
+            return self.read_tail()
         self._size = size
-        return self._render(self.source.read(self.position, size - self.position))
+        return self._render(screen)
 
     def read_before(self) -> list[str]:
         """Read the lines before what was read (empty at the start)"""
@@ -296,7 +347,8 @@ def read_log_slice(
     - ``content`` holds the completed lines (each ending with ``\\n``):
       clients append it to what they show (or prepend it when reading
       ``before``), or replace what they show with it when ``tail`` is true
-      (the end of the log was read);
+      (the end of the log was read: first read, file replaced, too much new
+      content, or lines already sent as completed rewritten);
     - ``partial`` holds the lines still being written (the last one, or the
       ones progress bars go back to), joined with ``\\n``: clients show it
       after the content and *replace* it on each poll;
@@ -334,12 +386,16 @@ def read_log_slice(
         or stale
         or size - offset > MAX_FORWARD_SIZE
     )
+    screen = None
+    if not tail:
+        start = offset
+        screen = _render_screen(source.read(offset, size - offset))
+        # Goes back to lines already sent as completed: read the end again
+        tail = screen.clamped
     if tail:
         data, start = _tail(source, size, tail_bytes)
-    else:
-        start = offset
-        data = source.read(offset, size - offset)
-    completed, pending, pending_offset = render_terminal(data)
+        screen = _render_screen(data)
+    completed, pending, pending_offset = _pending(screen)
     return {
         **result,
         "content": "".join(f"{line}\n" for line in completed),
