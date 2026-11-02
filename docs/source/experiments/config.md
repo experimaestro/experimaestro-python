@@ -896,6 +896,10 @@ class ModelLearn(Config):
         assert self.batch_size % self.micro_batch_size == 0
 ```
 
+`__validate__` is optional and has no default implementation: when a
+configuration inherits from another one, only call `super().__validate__()` if
+a parent class defines it.
+
 (value-classes)=
 ## Value classes
 

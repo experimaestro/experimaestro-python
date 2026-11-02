@@ -601,7 +601,7 @@ class ConfigInformation:
             for init_task in self.init_tasks:
                 init_task.__xpm__.validate()
 
-            # Use __validate__ method
+            # Use the (optional) __validate__ method
             if hasattr(self.pyobject, "__validate__"):
                 try:
                     self.pyobject.__validate__()
@@ -2372,10 +2372,6 @@ class ConfigMixin:
         param_name = matching_params[0]
         other.__xpm__.set(param_name, self)
         return other
-
-    def __validate__(self):
-        """Validate the values"""
-        pass
 
     def __json__(self):
         """Returns a JSON version of the object (if possible)"""
