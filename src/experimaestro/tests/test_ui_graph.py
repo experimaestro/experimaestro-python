@@ -445,6 +445,11 @@ def test_load_serialized_graph_and_mermaid(tmp_path: Path):
     graph = load_serialized_graph(exp_file)
     assert graph.nodes[h("base_learn")].name == "Learner (stub)"
     assert graph.nodes[h("train")].tags == {"lr": 0.001, "epochs": 10}
+    assert graph.nodes[h("train")].object_id == 4
+    assert len(graph.objects) == len(objects)
+    state = graph.state_dict()
+    assert "objects" in state
+    assert len(state["objects"]) == len(objects)
 
     # Sink config (ModelLoader) is promoted to ACTION so it appears in tasks-only view
     assert graph.nodes[h("output_loader")].kind == NodeKind.ACTION

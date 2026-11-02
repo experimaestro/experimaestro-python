@@ -63,6 +63,9 @@ class GraphNode:
     depends_on: list[str] = field(default_factory=list)
     """Identifiers of the nodes this one directly depends on"""
 
+    object_id: int | None = None
+    """Object ID in the serialized objects pool"""
+
     def state_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -71,6 +74,7 @@ class GraphNode:
             "taskId": self.task_id,
             "tags": self.tags,
             "dependsOn": self.depends_on,
+            "objectId": self.object_id,
         }
 
 
@@ -122,6 +126,9 @@ class ExperimentGraph:
     configs: list[dict[str, Any]] = field(default_factory=list)
     """Grid search configurations (tag values), see :func:`detect_grid_configs`"""
 
+    objects: dict[int, dict[str, Any]] = field(default_factory=dict)
+    """Serialized object definitions indexed by numeric ID"""
+
     @property
     def grid_keys(self) -> set[str]:
         return {k for c in self.configs for k in c}
@@ -132,6 +139,7 @@ class ExperimentGraph:
             "runId": self.run_id,
             "nodes": [n.state_dict() for n in self.nodes.values()],
             "configs": self.configs,
+            "objects": self.objects,
         }
 
     def index(self) -> dict[str, int]:
@@ -703,6 +711,7 @@ def build_experiment_graph(
             task_id=task_id,
             tags=tags,
             depends_on=list(found),
+            object_id=oid,
         )
 
     _remove_back_edges(nodes)
@@ -722,6 +731,7 @@ def build_experiment_graph(
         run_id=run_id,
         nodes=nodes,
         configs=detected_configs,
+        objects=objects,
     )
 
 
