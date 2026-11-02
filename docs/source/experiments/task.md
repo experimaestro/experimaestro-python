@@ -257,6 +257,7 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
 - **Idempotency**: The task should produce the same results whether run once or restarted multiple times
 - **Directory preservation**: Unlike regular tasks, the task directory is preserved between retries to maintain checkpoints
 - **Non-timeout failures**: Only timeout failures trigger retries. Other errors (out of memory, bugs, etc.) will not retry
+- **Cluster time limits**: The launcher file can accept durations longer than the partition limit for resumable tasks, and run them in several slices (see {ref}`long-jobs`)
 
 ### Querying Remaining Time
 

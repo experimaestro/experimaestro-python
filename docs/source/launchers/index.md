@@ -247,6 +247,70 @@ The `cuda=` parameter is still supported for backwards compatibility but
 `accelerators=` is preferred for new code as it supports all accelerator types.
 ```
 
+(long-jobs)=
+### Jobs longer than the partition time limit
+
+A cluster usually caps job duration (e.g. SLURM `MaxTime`), while a training
+task may legitimately request more (`duration=120h`). Rather than lowering the
+requirement in every experiment, `launchers.py` can accept the total duration
+and run {ref}`resumable tasks <resumable-tasks>` in slices: the job is
+submitted with the partition limit and, on timeout, resubmitted by the
+scheduler (up to `max_retries`, 3 by default) and restarts from its
+checkpoints.
+
+Whether a job is resumable is only known at submission, so this is done with a
+submit listener ({py:meth}`~experimaestro.launchers.Launcher.addListener`),
+which receives the {py:class}`~experimaestro.scheduler.jobs.Job` and can
+replace its launcher. Non-resumable tasks are refused when the experiment
+starts, instead of being rejected by SLURM later.
+
+```python
+from experimaestro import Job
+from experimaestro.launcherfinder import HostRequirement, HostSpecification
+from experimaestro.launchers.slurm import SlurmLauncher, SlurmOptions
+
+# Hard limit of the SLURM partitions
+PARTITION_MAX_DURATION = 48 * 3600
+# Total duration accepted for resumable tasks (several 48h runs)
+MAX_DURATION = 196 * 3600
+
+
+def cap_duration(job: Job):
+    if not job.resumable:
+        raise ValueError(
+            f"{job.config.__xpmtype__.identifier} requests more than"
+            f" {PARTITION_MAX_DURATION // 3600}h but is not a ResumableTask"
+        )
+    job.launcher = job.launcher.config(
+        time=SlurmOptions.format_time(PARTITION_MAX_DURATION)
+    )
+
+
+def find_launcher(requirements: HostRequirement, tags=set()):
+    if match := requirements.match(
+        HostSpecification(max_duration=MAX_DURATION, ...)
+    ):
+        duration = match.requirement.duration
+        launcher = SlurmLauncher(
+            options=SlurmOptions(
+                time=SlurmOptions.format_time(
+                    min(duration, PARTITION_MAX_DURATION)
+                ),
+                ...
+            )
+        )
+        if duration > PARTITION_MAX_DURATION:
+            launcher.addListener(cap_duration)
+        return launcher
+```
+
+```{note}
+The listener replaces `job.launcher` (using
+{py:meth}`~experimaestro.launchers.slurm.SlurmLauncher.config`) instead of
+modifying the launcher options in place: the same launcher instance is
+usually shared by many jobs, some of which may not be resumable.
+```
+
 ## Tags
 
 Tags can be used to filter out some launchers
