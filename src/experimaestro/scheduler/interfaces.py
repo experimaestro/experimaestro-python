@@ -161,6 +161,8 @@ class JobState:
     failure_reason: Optional["JobFailureStatus"] = (
         None  # Failure reason (for error states)
     )
+    #: What happened (for error states, when the launcher knows it)
+    message: str | None = None
 
     # Singleton instances (assigned after subclass definitions)
     UNSCHEDULED: "JobStateUnscheduled"
@@ -297,6 +299,59 @@ class JobState:
                 return JobStateError(JobFailureStatus.FAILED)
 
         return None
+
+
+@dataclass
+class FailureDetails:
+    """Details of a job failure, read from its ``.failed`` marker
+
+    The marker is written by the job process (the exception raised by the
+    task, a timeout or a cancellation), by the scheduler (a job the launcher
+    refused, e.g. a SLURM pending reason) or by the cleanup of crashed jobs.
+    """
+
+    #: Exit code of the job process
+    code: int | None = None
+    #: What happened, e.g. ``ValueError: bad input`` (None if not recorded)
+    message: str | None = None
+    #: Where the exception was raised, e.g. ``task.py:12 in execute``
+    location: str | None = None
+
+    @staticmethod
+    def from_path(basepath: Path, scriptname: str) -> "FailureDetails | None":
+        """Read the failure details of a job (None if it has no readable
+        ``.failed`` marker)"""
+        failedpath = basepath / f"{scriptname}.failed"
+        try:
+            content = failedpath.read_text().strip()
+        except OSError:
+            return None
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(data, int):
+            # Legacy format: the exit code only
+            return FailureDetails(code=data)
+        if not isinstance(data, dict):
+            return None
+        code = data.get("code")
+        return FailureDetails(
+            code=code if isinstance(code, int) else None,
+            message=data.get("message") or None,
+            location=data.get("location") or None,
+        )
+
+    def state_dict(self) -> dict[str, Any]:
+        return {"code": self.code, "message": self.message, "location": self.location}
+
+    @staticmethod
+    def from_state_dict(data: dict[str, Any]) -> "FailureDetails":
+        return FailureDetails(
+            code=data.get("code"),
+            message=data.get("message"),
+            location=data.get("location"),
+        )
 
 
 class JobStateUnscheduled(JobState):
@@ -447,13 +502,21 @@ class JobStateError(JobState):
         "DELETED": "🗑",
     }
 
-    def __init__(self, failure_reason: JobFailureStatus | None = None):
+    def __init__(
+        self,
+        failure_reason: JobFailureStatus | None = None,
+        message: str | None = None,
+    ):
         """Create an error state, optionally with failure details
 
         Args:
             failure_reason: Optional reason for the failure (JobFailureStatus enum value)
+            message: What happened, when the launcher knows it (e.g. the SLURM
+                pending reason of a rejected job); the scheduler writes it in
+                the ``.failed`` marker of a job that ended without one
         """
         self.failure_reason = failure_reason
+        self.message = message
 
     @property
     def icon(self) -> str:

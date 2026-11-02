@@ -105,6 +105,7 @@ class RPCMethod(str, Enum):
     GET_STRAY_JOBS = "get_stray_jobs"
     WATCH = "watch"
     READ_FILE = "read_file"
+    GET_FAILURE_DETAILS = "get_failure_details"
 
 
 #: Methods handled by the servers that do not list theirs (experimaestro 2.7.0)

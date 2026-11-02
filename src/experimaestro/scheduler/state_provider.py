@@ -36,6 +36,7 @@ from experimaestro.scheduler.interfaces import (
     BaseService,
     ExperimentJobInformation,
     ExperimentStatus,
+    FailureDetails,
     JobState,
     JobStateError,
     JobFailureStatus,
@@ -778,6 +779,16 @@ class StateProvider(ABC):
         Returns a ProcessInfo dataclass or None if not available.
         """
         return None
+
+    def get_failure_details(self, job: BaseJob) -> FailureDetails | None:
+        """Details of the failure of a job (None if it did not fail or nothing
+        was recorded), read from its ``.failed`` marker
+
+        Read when the job details are shown, not with the job state.
+        """
+        if job.path is None:
+            return None
+        return FailureDetails.from_path(Path(job.path), job.scriptname)
 
     def get_last_sync_time(self) -> datetime | None:
         """Get the last sync time (for incremental updates)"""

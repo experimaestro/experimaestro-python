@@ -271,16 +271,31 @@ class WebDriver:
     async def job_detail(self, job_id: str) -> JobDetail:
         await self._request("job.details", jobId=job_id, taskId=self._task_id(job_id))
         job = self.jobs[job_id]
+        deps = [self.jobs.get(dep) for dep in job["dependsOn"]]
         return JobDetail(
             job_id=job["jobId"],
             task_id=job["taskId"],
             state=job["status"],
             tags={key: value for key, value in job["tags"]},
             dependencies={
-                dep: self.jobs[dep]["status"] if dep in self.jobs else None
-                for dep in job["dependsOn"]
+                dep_id: dep["status"] if dep else None
+                for dep_id, dep in zip(job["dependsOn"], deps)
             },
+            failure=job["failureReason"],
+            dependency_failures={
+                dep_id: dep["failureReason"]
+                for dep_id, dep in zip(job["dependsOn"], deps)
+                if dep and dep["failureReason"]
+            },
+            failure_message=(job.get("failure") or {}).get("message"),
+            failure_location=(job.get("failure") or {}).get("location"),
         )
+
+    async def follow_dependency(self, job_id: str, dependency_id: str) -> JobDetail:
+        # The link needs the job of the dependency (for its task)
+        assert dependency_id in (await self.job_detail(job_id)).dependencies
+        assert dependency_id in self.jobs
+        return await self.job_detail(dependency_id)
 
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
         response = self.client.get(

@@ -110,6 +110,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_STRAY_JOBS.value: self._handle_get_stray_jobs,
             RPCMethod.WATCH.value: self._handle_watch,
             RPCMethod.READ_FILE.value: self._handle_read_file,
+            RPCMethod.GET_FAILURE_DETAILS.value: self._handle_get_failure_details,
         }
 
     def start(self):
@@ -562,6 +563,19 @@ class SSHStateProviderServer:
             "memory_mb": pinfo.memory_mb,
             "num_threads": pinfo.num_threads,
         }
+
+    def _handle_get_failure_details(self, params: dict) -> dict | None:
+        """Handle get_failure_details request"""
+        task_id = params.get("task_id")
+        job_id = params.get("job_id")
+        if not task_id or not job_id:
+            raise TypeError("task_id and job_id are required")
+
+        job = self._state_provider.get_job(task_id, job_id)
+        if job is None:
+            return None
+        details = self._state_provider.get_failure_details(job)
+        return details.state_dict() if details is not None else None
 
     def _handle_execute_warning_action(self, params: dict) -> None:
         """Handle execute_warning_action request"""

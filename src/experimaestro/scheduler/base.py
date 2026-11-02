@@ -1574,6 +1574,7 @@ class Scheduler(StateProvider, threading.Thread):
                     if code is not None:
                         # Fall back to process-specific state detection
                         state = process.get_job_state(code)
+                        self._write_launcher_failure(job, code, state)
                     else:
                         logger.error("No .done or .failed file found for job %s", job)
                         state = JobState.ERROR
@@ -1635,6 +1636,32 @@ class Scheduler(StateProvider, threading.Thread):
         # Notify scheduler listeners of job state after job completes
         self.notify_job_state(job)
         return state
+
+    @staticmethod
+    def _write_launcher_failure(job: Job, code: int, state: JobState) -> None:
+        """Record a failure explained by the launcher in the ``.failed`` marker
+
+        Called for a job whose process ended without writing a marker (e.g. a
+        job SLURM refused to start), while the job lock is held: the marker
+        keeps the reason after the experiment ends, and its message is shown
+        in the job details.
+        """
+        if not (state.is_error() and state.message) or state.failure_reason is None:
+            return
+        try:
+            atomic_write_json(
+                job.failedpath,
+                {
+                    "code": code,
+                    "reason": state.failure_reason.name.lower(),
+                    "message": state.message,
+                },
+                fsync=True,
+            )
+        except OSError:
+            logger.warning(
+                "Could not write the failure marker of %s", job, exc_info=True
+            )
 
     # =========================================================================
     # StateProvider abstract method implementations

@@ -3,13 +3,20 @@ import sys
 import asyncio
 import threading
 import concurrent.futures
+from types import SimpleNamespace
 from experimaestro.connectors import Redirect
 from experimaestro.tests.utils import TemporaryExperiment
 from experimaestro.connectors.local import LocalConnector
 from experimaestro.launchers.slurm import (
     SlurmLauncher,
 )
-from experimaestro.launchers.slurm.base import SlurmProcessWatcher
+from experimaestro.launchers.slurm.base import (
+    BatchSlurmProcess,
+    SlurmJobState,
+    SlurmProcessWatcher,
+)
+from experimaestro.scheduler.base import Scheduler
+from experimaestro.scheduler.interfaces import FailureDetails, JobFailureStatus
 from experimaestro import field, ResumableTask, Param
 from experimaestro.scheduler import JobState
 import shutil
@@ -304,3 +311,32 @@ def test_slurm_watcher_reuse_after_cleanup(slurmlauncher: SlurmLauncher):
     builder.command = [sys.executable, slurmlauncher.binpath / "test.py"]
     p = builder.start()
     assert p.wait() == 0
+
+
+def test_slurm_rejection_recorded(tmp_path: Path):
+    """A job SLURM refuses to start: the reason is kept in the .failed marker
+    written by the scheduler, and shown in the job details"""
+    process = BatchSlurmProcess(None, "1234")
+    process._last_state = SlurmJobState("PENDING", None, None)
+    process._last_state.set_pending_reason("PartitionTimeLimit")
+
+    state = process.get_job_state(1)
+    assert state.failure_reason == JobFailureStatus.REJECTED_TIMELIMIT
+    assert state.message == "Rejected by SLURM (reason: PartitionTimeLimit)"
+
+    # The job process never ran: the scheduler writes the marker
+    job = SimpleNamespace(failedpath=tmp_path / "task.failed")
+    Scheduler._write_launcher_failure(job, 1, state)
+    assert JobState.from_path(tmp_path, "task").failure_reason == (
+        JobFailureStatus.REJECTED_TIMELIMIT
+    )
+    assert FailureDetails.from_path(tmp_path, "task") == FailureDetails(
+        code=1, message="Rejected by SLURM (reason: PartitionTimeLimit)"
+    )
+
+
+def test_launcher_failure_without_message(tmp_path: Path):
+    """No marker is written when the launcher does not explain the failure"""
+    job = SimpleNamespace(failedpath=tmp_path / "task.failed")
+    Scheduler._write_launcher_failure(job, 1, JobState.ERROR)
+    assert not job.failedpath.exists()

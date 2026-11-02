@@ -18,7 +18,11 @@ from fastapi import WebSocket
 from experimaestro.scheduler import job_operations, service_operations
 from experimaestro.scheduler.event_filter import EventFilter
 from experimaestro.scheduler.job_operations import Outcome
-from experimaestro.scheduler.job_status import display_state, status_rank
+from experimaestro.scheduler.job_status import (
+    display_state,
+    failure_description,
+    status_rank,
+)
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import ConnectionStateEvent, EventBase
@@ -180,6 +184,9 @@ def serialize_job(
     if provider is not None:
         payload["locator"] = provider.get_display_path(job)
     payload["statusRank"] = status_rank(state)
+    # Failure reason as shown by the TUI (icon) with its description
+    payload["failureIcon"] = state.icon if state.failure_reason else None
+    payload["failureDescription"] = failure_description(state)
     return payload
 
 
@@ -754,37 +761,57 @@ class WebSocketHandler:
             )
 
     async def _handle_job_details(self, websocket: WebSocket, payload: dict[str, Any]):
-        """Handle job details request"""
+        """Handle job details request
+
+        The details add to the job state what is only read when the job is
+        shown: the live process information and the failure details.
+        """
         job_id = payload.get("jobId")
+        task_id = payload.get("taskId")
+
+        def failure(job: BaseJob) -> dict[str, Any] | None:
+            try:
+                details = self.state_provider.get_failure_details(job)
+            except Exception:
+                logger.warning(
+                    "Could not read the failure of %s", job_id, exc_info=True
+                )
+                return None
+            return details.state_dict() if details is not None else None
 
         if self._scheduler and job_id in self._scheduler.jobs:
             # Get from scheduler (live Job)
             job = self._scheduler.jobs[job_id]
-            await websocket.send_json(
-                {"type": "job.update", "payload": serialize_live_job(job)}
-            )
-        else:
+
+            def details():
+                update = serialize_live_job(job)
+                update["failure"] = failure(job)
+                return update
+
+        elif task_id:
             # Get from state provider (MockJob)
-            task_id = payload.get("taskId")
-            if task_id:
+            def details():
+                job = self.state_provider.get_job(task_id, job_id)
+                if job is None:
+                    return None
+                # Enrich with live process info (cpu/memory/threads) when
+                # the provider supports it.
+                try:
+                    process_info = self.state_provider.get_process_info(job)
+                except Exception:
+                    process_info = None
+                update = serialize_job_update(
+                    job, process_info=process_info, provider=self.state_provider
+                )
+                update["failure"] = failure(job)
+                return update
 
-                def details():
-                    job = self.state_provider.get_job(task_id, job_id)
-                    if job is None:
-                        return None
-                    # Enrich with live process info (cpu/memory/threads) when
-                    # the provider supports it.
-                    try:
-                        process_info = self.state_provider.get_process_info(job)
-                    except Exception:
-                        process_info = None
-                    return serialize_job_update(
-                        job, process_info=process_info, provider=self.state_provider
-                    )
+        else:
+            return
 
-                update = await self._in_thread(details)
-                if update is not None:
-                    await websocket.send_json({"type": "job.update", "payload": update})
+        update = await self._in_thread(details)
+        if update is not None:
+            await websocket.send_json({"type": "job.update", "payload": update})
 
     async def _notify_outcome(self, websocket: WebSocket, operation) -> Outcome:
         """Run a job operation (blocking) and show its outcome as a toast"""

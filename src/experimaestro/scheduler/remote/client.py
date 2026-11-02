@@ -1740,6 +1740,21 @@ class SSHStateProviderClient(OfflineStateProvider):
             num_threads=result.get("num_threads"),
         )
 
+    def get_failure_details(self, job: BaseJob):
+        """Details of the failure of a job, read by the remote server
+
+        Returns None if the remote server is too old to send them.
+        """
+        from experimaestro.scheduler.interfaces import FailureDetails
+
+        if not self.supports(RPCMethod.GET_FAILURE_DETAILS):
+            return None
+        result = self._call_sync(
+            RPCMethod.GET_FAILURE_DETAILS,
+            {"task_id": job.task_id, "job_id": job.identifier},
+        )
+        return FailureDetails.from_state_dict(result) if result else None
+
     def execute_warning_action(
         self,
         warning_key: str,

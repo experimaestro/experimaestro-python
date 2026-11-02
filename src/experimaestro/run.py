@@ -7,6 +7,7 @@ import signal
 import sys
 import json
 import threading
+import traceback
 from typing import TYPE_CHECKING
 from experimaestro.notifications import progress, report_eoj, start_of_job
 from experimaestro.utils.multiprocessing import delayed_shutdown
@@ -368,6 +369,26 @@ except ImportError:
     CarbonTracker = None  # type: ignore
 
 
+#: Maximum length of the exception message recorded in the ``.failed`` marker
+MAX_FAILURE_MESSAGE = 2000
+
+
+def exception_details(e: BaseException) -> dict[str, str]:
+    """Message and location of an exception, for the ``.failed`` marker
+
+    The location is the innermost frame of the traceback, where the
+    exception was raised (the full traceback is in the job's stderr).
+    """
+    message = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+    if len(message) > MAX_FAILURE_MESSAGE:
+        message = message[: MAX_FAILURE_MESSAGE - 1] + "…"
+    location = ""
+    if frames := traceback.extract_tb(e.__traceback__):
+        frame = frames[-1]
+        location = f"{frame.filename}:{frame.lineno} in {frame.name}"
+    return {"message": message, "location": location}
+
+
 class TaskRunner:
     """Runs a task, after locking"""
 
@@ -486,11 +507,19 @@ class TaskRunner:
         if self._publish_outcome("done", write):
             crashpoint("job.done_written")
 
-    def write_failed(self, code, reason: str, message: str = "") -> bool:
-        """Write the ``.failed`` marker (unless an outcome was published)"""
+    def write_failed(
+        self, code, reason: str, message: str = "", location: str = ""
+    ) -> bool:
+        """Write the ``.failed`` marker (unless an outcome was published)
+
+        Its ``message`` and ``location`` are shown in the job details (see
+        :class:`~experimaestro.scheduler.interfaces.FailureDetails`).
+        """
         failure_info = {"code": code, "reason": reason}
         if message:
             failure_info["message"] = message
+        if location:
+            failure_info["location"] = location
         return self._publish_outcome(
             "failed",
             lambda: atomic_write_json(self.failedpath, failure_info, fsync=True),
@@ -570,7 +599,14 @@ class TaskRunner:
             report_eoj(final_state)
         logger.info("Finished cleanup")
 
-    def handle_error(self, code, frame_type, reason: str = "failed", message: str = ""):
+    def handle_error(
+        self,
+        code,
+        frame_type,
+        reason: str = "failed",
+        message: str = "",
+        location: str = "",
+    ):
         """Handle task error and write failure information.
 
         Args:
@@ -578,10 +614,11 @@ class TaskRunner:
             frame_type: Signal frame type (unused)
             reason: Failure reason (e.g., "failed", "timeout")
             message: Optional message with details
+            location: Optional place where the error was raised
         """
         logger.info("Error handler: finished with code %d, reason=%s", code, reason)
         env = taskglobals.Env.instance()
-        if not env.slave and self.write_failed(code, reason, message):
+        if not env.slave and self.write_failed(code, reason, message, location):
             crashpoint("job.failed_written")
 
         self.cleanup()
@@ -818,9 +855,9 @@ class TaskRunner:
             self._join_cleanup_thread()
             sys.exit(1)
 
-        except Exception:
+        except Exception as e:
             logger.exception("Got exception while running")
-            self.handle_error(1, None)
+            self.handle_error(1, None, **exception_details(e))
 
         except SystemExit as e:
             env = taskglobals.Env.instance()

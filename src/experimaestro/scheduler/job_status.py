@@ -30,6 +30,19 @@ FAILURE_ORDER = {
     "FAILED": 5,  # Generic failure
 }
 
+#: Description of each failure reason, shown by the TUI and the web UI
+FAILURE_DESCRIPTIONS = {
+    "DEPENDENCY": "a dependency failed",
+    "FAILED": "the job failed",
+    "MEMORY": "out of memory",
+    "TIMEOUT": "timed out",
+    "CANCELLED": "cancelled",
+    "REJECTED_TIMELIMIT": "rejected: time limit above the partition maximum",
+    "REJECTED_OTHER": "rejected by the launcher",
+    "MISSING_OUTPUTS": "outputs missing (probably purged)",
+    "DELETED": "job data deleted",
+}
+
 #: Rank of unknown statuses and failure reasons (sorted last)
 UNKNOWN_RANK = 99
 
@@ -45,6 +58,14 @@ def display_state(job: BaseJob, experiment: BaseExperiment | None = None) -> Job
         state, _ = StateProvider.get_resolved_state(job, experiment)
         return state
     return job.scheduler_state.resolve(job.state) or job.state
+
+
+def failure_description(state: JobState | None) -> str | None:
+    """Description of the failure reason of a state (None if there is none)"""
+    reason = state.failure_reason if state is not None else None
+    if reason is None:
+        return None
+    return FAILURE_DESCRIPTIONS.get(reason.name, reason.name.lower())
 
 
 def status_rank(state: JobState | None) -> int:
