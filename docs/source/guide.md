@@ -22,8 +22,8 @@ Where to find what, depending on what you are trying to do.
 ## 🏁 Getting started
 
 If you are new to the project, start with the [Tutorial](./tutorial.md). It
-walks you through setting up your first workspace and running a basic
-experiment: training a CNN on MNIST.
+introduces the main concepts (configurations, tasks, experimental plans,
+launchers, monitoring) on a small example, and points to a complete project.
 
 ## 🧪 Building experiments
 

@@ -162,6 +162,12 @@ plugins = ["experimaestro.mypy"]
 disable_error_code = ["annotation-unchecked"]
 warn_unused_ignores = true
 
+# The walkthrough example imports its sibling module as `tasks` (the
+# experiment runner puts the folder of the YAML file in the Python path)
+[[tool.mypy.overrides]]
+module = ["experimaestro.tests.tutorial.experiment", "experimaestro.tests.tutorial.results"]
+disable_error_code = ["import-not-found"]
+
 # Third-party modules without type information
 [[tool.mypy.overrides]]
 module = [
@@ -392,6 +398,8 @@ ignore = [
 # Standalone helper scripts are CLIs: printing to stdout is intended.
 "scripts/*" = ["T20"]
 "dev/*" = ["T20"]
+# The walkthrough example (included in the docs) prints on purpose
+"src/experimaestro/tests/tutorial/*" = ["T20"]
 # Checks that the legacy typing forms (List, Optional, ...) still work
 "src/experimaestro/tests/core/test_legacy_typing.py" = ["UP006", "UP007", "UP035", "UP045"]
 

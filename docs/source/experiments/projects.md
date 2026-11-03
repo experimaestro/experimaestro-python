@@ -68,7 +68,8 @@ for a whole field (see [Building a domain-specific library](#building-a-domain-s
 - [experiment-template](https://github.com/experimaestro/experiment-template) —
   a minimal project skeleton to clone.
 - [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) — a
-  fuller worked example (the MNIST [tutorial](../tutorial.md)).
+  fuller worked example (an MNIST CNN, the complete example of the
+  [tutorial](../tutorial.md)).
 
 ## The smallest possible project
 
@@ -132,7 +133,7 @@ the command-line flags (`--run-mode`, `-c`, `--pre-yaml`/`--post-yaml`,
 
 As a project grows, the experimental code is split into focused modules. The
 [`experimaestro-demo`](https://github.com/experimaestro/experimaestro-demo)
-repository (an MNIST CNN hyper-parameter search, also used as the
+repository (an MNIST CNN hyper-parameter search, the complete example of the
 [tutorial](../tutorial.md)) is a representative example:
 
 ```
@@ -240,7 +241,7 @@ for the full helper API.
 
 ## See also
 
-- [Tutorial](../tutorial.md) — a guided walk-through of the demo project.
+- [Tutorial](../tutorial.md) — the main concepts on a small example, and the demo project.
 - [Running experiments](../experiments.md) — launching experiments, and the
   practices that keep results reusable.
 - [The CLI experiment runner](cli-runner.md) — the YAML configuration reference.

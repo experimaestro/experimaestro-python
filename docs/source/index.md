@@ -73,7 +73,8 @@ Experimaestro's distinct features include:
 ## Where to start
 
 **New here?** The [Tutorial](./tutorial.md) walks you through your first
-workspace and a first experiment: training a CNN on MNIST.
+experiment, introducing configurations, tasks, experimental plans, launchers
+and monitoring on a small example.
 
 **Looking for something specific?** The [Guide to the documentation](./guide.md)
 says which page answers which question.

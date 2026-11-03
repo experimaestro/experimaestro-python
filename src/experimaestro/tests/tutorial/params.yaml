@@ -1,0 +1,4 @@
+id: linear
+file: experiment
+learning_rates: [0.001, 0.01, 0.1]
+epochs: 100
