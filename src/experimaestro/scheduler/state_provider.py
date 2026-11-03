@@ -859,6 +859,7 @@ class OfflineStateProvider(StateProvider):
     implementations that need state listener support and caching.
 
     Caching strategy:
+
     - Jobs and experiments are cached by their identifiers
     - Events update cached objects in-place to maintain consistency
     - Read queries (get_jobs, get_experiments, get_tags_map, ...) are cached
@@ -1365,6 +1366,7 @@ class OfflineStateProvider(StateProvider):
         to maintain state consistency.
 
         Handles:
+
         - JobStateChangedEvent: Updates job state in cache
         - JobProgressEvent: Updates job progress in cache
         - CarbonMetricsEvent: Updates job carbon metrics in cache

@@ -451,7 +451,7 @@ Type annotations are used to declare parameters in configurations and tasks.
 
 ```{eval-rst}
 .. autoclass:: experimaestro.huggingface.ExperimaestroHFHub
-   :members: from_pretrained, push_to_hub
+   :members: definition_filename, serialization_context_class, generate_dag_html, get_dag_mermaid
 ```
 
 ## Submit Hooks

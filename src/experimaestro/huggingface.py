@@ -15,6 +15,11 @@ except ImportError:
 class ExperimaestroHFHub(ModelHubMixin):
     """Defines models that can be uploaded/downloaded from the Hub.
 
+    ``ExperimaestroHFHub(config).push_to_hub(hf_id)`` uploads a configuration,
+    and ``ExperimaestroHFHub.from_pretrained(hf_id_or_folder,
+    as_instance=False)`` loads it back (as an instance if ``as_instance``);
+    both come from huggingface_hub's ``ModelHubMixin``.
+
     Subclass to customize serialization behavior:
 
     - ``definition_filename``: Override the JSON definition filename (default: ``"experimaestro.json"``).
@@ -43,6 +48,7 @@ class ExperimaestroHFHub(ModelHubMixin):
             self.generate_dag_html(save_directory)
         except Exception as e:
             import logging
+
             logging.getLogger("experimaestro").debug(
                 "Failed to generate dag.html during save: %s", e
             )

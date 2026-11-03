@@ -51,6 +51,9 @@ extensions = [
     "sphinx_copybutton",
 ]
 
+# Optional dependencies of documented modules (not installed with the docs)
+autodoc_mock_imports = ["huggingface_hub"]
+
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 

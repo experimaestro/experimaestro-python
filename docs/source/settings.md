@@ -230,7 +230,7 @@ workspaces:
 
 Workspaces can be configured with SSH settings for remote access. A workspace
 with `ssh` settings is a **remote workspace**: all the commands except `run` work
-on it (see [Remote Workspaces](cli.md#remote-workspaces)), and it is
+on it (see [Remote Workspaces](cli.md#remote-ssh-workspaces)), and it is
 automatically excluded from local experiment workspace discovery (trigger
 matching and default workspace selection).
 

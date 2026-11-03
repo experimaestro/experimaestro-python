@@ -87,7 +87,7 @@ information (real names, emails, …): use made-up values.
 
 Features of the monitoring interfaces (TUI and web UI) are tested once, for
 both, in `src/experimaestro/tests/ui/`. Each test drives a
-[`UIDriver`](src/experimaestro/tests/ui/drivers.py) — what a user does (open an
+[`UIDriver`](https://github.com/experimaestro/experimaestro-python/blob/master/src/experimaestro/tests/ui/drivers.py) — what a user does (open an
 experiment, type a filter, kill a job) and what the interface shows — and runs
 with every driver:
 
@@ -98,7 +98,7 @@ with every driver:
 | `browser` | the web UI in headless Chromium (Playwright), opt-in |
 
 All of them read the same made-up workspace
-([`scenario.py`](src/experimaestro/tests/ui/scenario.py)). When you add or
+([`scenario.py`](https://github.com/experimaestro/experimaestro-python/blob/master/src/experimaestro/tests/ui/scenario.py)). When you add or
 change a UI feature:
 
 1. add the operation to `UIDriver` and implement it in every driver;

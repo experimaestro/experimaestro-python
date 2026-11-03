@@ -104,6 +104,7 @@ debugging experimaestro.
 ```{eval-rst}
 .. autoclass:: experimaestro.scheduler.workspace.RunMode
    :members:
+   :no-index:
 ```
 
 ## Dynamic Outputs

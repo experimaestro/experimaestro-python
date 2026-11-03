@@ -288,15 +288,14 @@ def cap_duration(job: Job):
 
 def find_launcher(requirements: HostRequirement, tags=set()):
     if match := requirements.match(
-        HostSpecification(max_duration=MAX_DURATION, ...)
+        # (with the other limits of the host: CPUs, memory, accelerators)
+        HostSpecification(max_duration=MAX_DURATION)
     ):
         duration = match.requirement.duration
         launcher = SlurmLauncher(
             options=SlurmOptions(
-                time=SlurmOptions.format_time(
-                    min(duration, PARTITION_MAX_DURATION)
-                ),
-                ...
+                time=SlurmOptions.format_time(min(duration, PARTITION_MAX_DURATION)),
+                # ... and the other SLURM options (partition, GPUs, ...)
             )
         )
         if duration > PARTITION_MAX_DURATION:
