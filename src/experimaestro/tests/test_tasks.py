@@ -12,6 +12,7 @@ from experimaestro import (
     Config,
     Task,
     Param,
+    GracefulTimeout,
     ResumableTask,
     Meta,
     field,
@@ -271,18 +272,21 @@ class ControllableResumableTask(ResumableTask):
 
         if action == "fail":
             sys.exit(1)
+        if action == "timeout":
+            raise GracefulTimeout("no time left")
 
 
 def test_resumable_task_resubmit():
-    """Test that resubmitting a failed ResumableTask stays failed unless max_retries increased"""
+    """Test that resubmitting a ResumableTask with no retry left stays failed
+    unless max_retries increased"""
     with TemporaryExperiment("resumable_resubmit", timeout_multiplier=12):
         logging.info("# Submission 1/3")
         task1 = ControllableResumableTask.C()
         task1.submit(max_retries=1)
 
-        # Tell task to fail
+        # Tell task to time out (its only retry)
         task1.control_file.parent.mkdir(parents=True, exist_ok=True)
-        task1.control_file.write_text("fail")
+        task1.control_file.write_text("timeout")
 
         # Wait for the job to fail
         job = task1.__xpm__.job
@@ -312,9 +316,10 @@ def test_resumable_task_resubmit():
 
 
 def test_resumable_task_resubmit_across_experiments():
-    """Test resubmitting a failed ResumableTask across experiments requires higher max_retries"""
+    """Test resubmitting a ResumableTask with no retry left across experiments
+    requires higher max_retries"""
     with TemporaryDirectory(prefix="xpm", suffix="resubmit_across") as workdir:
-        # First experiment: task fails
+        # First experiment: task times out (its only retry)
         try:
             with TemporaryExperiment(
                 "resubmit_across", timeout_multiplier=6, workdir=workdir
@@ -322,9 +327,8 @@ def test_resumable_task_resubmit_across_experiments():
                 task1 = ControllableResumableTask.C()
                 task1.submit(max_retries=1)
 
-                # Tell task to fail
                 task1.control_file.parent.mkdir(parents=True, exist_ok=True)
-                task1.control_file.write_text("fail")
+                task1.control_file.write_text("timeout")
         except Exception as e:
             logging.info("First experiment ended (expected): %s", e)
 
@@ -352,6 +356,24 @@ def test_resumable_task_resubmit_across_experiments():
 
             # Now it should complete
             assert task3.__xpm__.job.wait() == JobState.DONE
+
+
+def test_resumable_task_resubmit_after_failure():
+    """A ResumableTask that failed (not a timeout) runs again when resubmitted,
+    whatever its max_retries"""
+    with TemporaryExperiment("resumable_resubmit_failure", timeout_multiplier=12):
+        task1 = ControllableResumableTask.C()
+        task1.submit(max_retries=1)
+        task1.control_file.parent.mkdir(parents=True, exist_ok=True)
+        task1.control_file.write_text("fail")
+        job = task1.__xpm__.job
+        assert job.wait() == JobState.ERROR
+        assert job.retry_count == 0
+
+        task2 = ControllableResumableTask.C()
+        task2.submit(max_retries=1)
+        task2.control_file.write_text("complete")
+        assert task2.__xpm__.job.wait() == JobState.DONE
 
 
 def test_task_resubmit_across_experiments():

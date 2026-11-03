@@ -251,6 +251,16 @@ When a resumable task times out (e.g., reaches SLURM walltime limit), the schedu
    task = LongTraining.C(epochs=1000).submit(max_retries=10)
    ```
 
+Only timeouts count as retries: `retry_count` (shown as *Retries* in the job
+details of the TUI and the web UI, e.g. `1/3`) is the number of times the job
+timed out. Once it reaches `max_retries`, the job is not restarted, neither in
+this run nor when the experiment is run again: the job details show
+`3/3 — exhausted, not restarted`, and a warning in the UIs offers to
+**Retry anyway**, which runs the job again with a fresh retry count (submitting
+the task with a higher `max_retries` also restarts it). A job that failed for
+another reason is not retried in the same run, but runs again (with a fresh
+retry count) when it is submitted again, like any failed task.
+
 ### Important Considerations
 
 - **Checkpointing**: Your task should save progress to checkpoints and check for existing checkpoints on startup
@@ -355,7 +365,7 @@ class LongTraining(ResumableTask):
 When `GracefulTimeout` is raised:
 
 1. The task is marked as failed with reason "timeout"
-2. If `retry_count < max_retries`, the task is automatically resubmitted
+2. If it timed out fewer than `max_retries` times, the task is automatically resubmitted
 3. The task directory is preserved, allowing the task to resume from its checkpoint
 
 This is useful when:

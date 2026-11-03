@@ -2036,6 +2036,7 @@ class MockJob(BaseJob):
             previous_carbon_metrics=previous_carbon_metrics,
         )
         job.resumable = d.get("resumable", False)
+        job.max_retries = d.get("max_retries")
         return job
 
     def update_from_state_dict(self, d: dict) -> None:
@@ -2060,6 +2061,7 @@ class MockJob(BaseJob):
         self.endtime = deserialize_to_datetime(d.get("ended_time"))
         self.exit_code = d.get("exit_code")
         self.retry_count = d.get("retry_count", 0)
+        self.max_retries = d.get("max_retries", self.max_retries)
         self.resumable = d.get("resumable", self.resumable)
         self.progress = get_progress_information_from_dict(d.get("progress", []))
 
@@ -2074,6 +2076,12 @@ class MockJob(BaseJob):
             self.run_group_id = run_group_id
         if self.path is None and (path := d.get("path")) is not None:
             self.path = Path(path)
+
+    def _load_from_status_dict(self, status_dict: dict[str, Any]) -> None:
+        super()._load_from_status_dict(status_dict)
+        # A live job has its own (from the submission); a job read from disk
+        # only knows the one of its last run
+        self.max_retries = status_dict.get("max_retries")
 
     @classmethod
     def from_disk(

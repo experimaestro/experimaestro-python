@@ -204,6 +204,9 @@ class Job(BaseJob, Resource):
         if max_retries is None and self.workspace:
             max_retries = self.workspace.workspace_settings.max_retries
         self.max_retries = max_retries if max_retries is not None else 3
+        # Set to run the job again with a fresh retry count, even if it has no
+        # retry left (the "retry anyway" action)
+        self.reset_retries = False
 
         # Scheduler lifecycle state (independent from execution state)
         self._scheduler_state: JobState = JobState.UNSCHEDULED

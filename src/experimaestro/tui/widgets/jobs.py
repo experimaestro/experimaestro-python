@@ -16,7 +16,11 @@ from rich.text import Text
 
 from experimaestro.cli.filter import FILTER_SYNTAX_HINT, FilterContext, createFilter
 from experimaestro.scheduler.interfaces import FailureDetails, JobState
-from experimaestro.scheduler.job_status import failure_description, status_rank
+from experimaestro.scheduler.job_status import (
+    failure_description,
+    retries_summary,
+    status_rank,
+)
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.tui.utils import format_duration
 from experimaestro.tui.messages import (
@@ -509,6 +513,8 @@ class JobDetailView(Widget):
         failure_reason = job.state.failure_reason if job.state else None
         if failure_reason:
             status_text += f" ({failure_reason.name}: {failure_description(job.state)})"
+        if retries := retries_summary(job):
+            status_text += f" | Retries: {retries}"
 
         self.query_one("#job-status-label", Label).update(f"Status: {status_text}")
 

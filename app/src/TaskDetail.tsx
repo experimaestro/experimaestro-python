@@ -136,15 +136,22 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
           <span className={classes.what}>Duration</span>
           <div>{formatDuration(job.start, job.end)}</div>
 
-          {(job.exitCode !== null && job.exitCode !== undefined) ||
-          (job.retryCount ?? 0) > 0 ? (
+          {job.exitCode !== null && job.exitCode !== undefined && (
             <>
-              <span className={classes.what}>Exit / retries</span>
+              <span className={classes.what}>Exit code</span>
+              <div>{job.exitCode}</div>
+            </>
+          )}
+
+          {job.retries && (
+            <>
+              <span className={classes.what}>Retries</span>
               <div>
-                exit {job.exitCode ?? "—"}, retries {job.retryCount ?? 0}
+                {job.retries}
+                {" (only timeouts are retried)"}
               </div>
             </>
-          ) : null}
+          )}
 
           {proc && (
             <>

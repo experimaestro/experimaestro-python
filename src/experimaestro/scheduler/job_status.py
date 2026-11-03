@@ -80,3 +80,28 @@ def status_rank(state: JobState | None) -> int:
         reason = state.failure_reason
         rank += FAILURE_ORDER.get(reason.name, UNKNOWN_RANK) if reason else UNKNOWN_RANK
     return rank
+
+
+def retries_summary(job: BaseJob, state: JobState | None = None) -> str | None:
+    """Retries of a resumable job, e.g. ``1/3`` (None if it has none)
+
+    Only timeouts are retried; a job that timed out with no retry left is not
+    restarted, which the summary says.
+
+    :param state: the displayed state of the job (defaults to its state)
+    """
+    if not job.resumable or (job.retry_count == 0 and job.max_retries is None):
+        return None
+    if job.max_retries is None:
+        return str(job.retry_count)
+    summary = f"{job.retry_count}/{job.max_retries}"
+    state = state or job.state
+    if (
+        state is not None
+        and state.is_error()
+        and state.failure_reason is not None
+        and state.failure_reason.name == "TIMEOUT"
+        and job.retry_count >= job.max_retries
+    ):
+        summary += " — exhausted, not restarted"
+    return summary

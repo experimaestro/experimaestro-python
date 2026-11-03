@@ -321,8 +321,12 @@ handler processing. They can be converted to non-transient if a job depends on t
 
 Tasks inheriting from {py:class}`~experimaestro.ResumableTask` support automatic retry on timeout:
 
-1. When a timeout occurs, `retry_count` is incremented
-2. If `retry_count <= max_retries`, the job restarts automatically
+1. When a timeout occurs, `retry_count` is incremented (other failures do not
+   count as retries)
+2. The job restarts automatically, unless `retry_count >= max_retries`: the
+   scheduler then emits a `WarningEvent` (`retries_exhausted_<job id>`) whose
+   *retry* action resubmits the job with a fresh retry count
+   (`Job.reset_retries`)
 3. Log files are rotated via {py:meth}`~experimaestro.scheduler.jobs.Job.rotate_logs` to preserve previous run's output
 4. The job directory is preserved between retries for checkpoint files
 

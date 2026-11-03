@@ -618,7 +618,8 @@ class BaseJob:
         endtime: When job finished (datetime or None)
         progress: List of progress updates
         exit_code: Process exit code (optional)
-        retry_count: Number of retries
+        retry_count: Number of retries (timeouts of a resumable task)
+        max_retries: Maximum number of retries (None if unknown)
     """
 
     identifier: str
@@ -629,6 +630,7 @@ class BaseJob:
     endtime: datetime | None
     exit_code: int | None
     retry_count: int
+    max_retries: int | None
     resumable: bool
     carbon_metrics: Optional["CarbonMetricsData"]
     run_group_id: str | None
@@ -649,6 +651,7 @@ class BaseJob:
         self.endtime: datetime | None = None
         self.exit_code: int | None = None
         self.retry_count: int = 0
+        self.max_retries: int | None = None
         self.resumable: bool = False
         self.carbon_metrics: "CarbonMetricsData | None" = None
         self._progress: list = []
@@ -884,6 +887,7 @@ class BaseJob:
             "ended_time": serialize_timestamp(self.endtime),
             "exit_code": self.exit_code,
             "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
             "resumable": self.resumable,
             "progress": [
                 p.to_dict() if hasattr(p, "to_dict") else p

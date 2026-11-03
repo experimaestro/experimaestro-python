@@ -91,6 +91,8 @@ export type Job = {
   failure?: FailureDetails | null;
   exitCode?: number | null;
   retryCount?: number;
+  /** Retries of a resumable job, e.g. "3/3 — exhausted, not restarted" */
+  retries?: string | null;
 
   tags: Array<[string, number | string | boolean]>;
 

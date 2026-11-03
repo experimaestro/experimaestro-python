@@ -1118,19 +1118,21 @@ class Scheduler(StateProvider, threading.Thread):
             # decide whether the job actually has to be re-run.
             job.clear_done_marker()
 
-        # Check if job failed with exhausted retries (scheduler knows the lifecycle)
-        if (
-            job.scheduler_state.is_error()
-            and job.resumable
-            and job.retry_count >= job.max_retries
-        ):
-            logger.info(
-                "Job %s failed with retry_count=%d/max_retries=%d - not restarting",
-                job.identifier[:8],
-                job.retry_count,
-                job.max_retries,
-            )
-            return
+        # A resumable job is retried after a timeout, at most max_retries
+        # times: past that it is not restarted (the user can retry it from the
+        # warning shown in the UIs, or by submitting it with a higher
+        # max_retries). Any other failure is not a retry: the job runs again,
+        # with a fresh retry count.
+        if job.scheduler_state.is_error() and job.resumable:
+            if (
+                job.scheduler_state.failure_reason != JobFailureStatus.TIMEOUT
+                or job.reset_retries
+            ):
+                job.retry_count = 0
+            elif job.retry_count >= job.max_retries:
+                self._retries_exhausted(job)
+                return
+        job.reset_retries = False
 
         # Check if we have a running process
         if not job.state.finished():
@@ -1555,19 +1557,24 @@ class Scheduler(StateProvider, threading.Thread):
         # Finalize status: load from disk (carbon info), set state, increment retry_count
         def finalize_callback(j: Job):
             j.set_scheduler_state(state)
-            # Increment retry_count for any failure of a resumable task
-            if state.is_error() and j.resumable:
+            # Only a timeout counts as a retry (it is the only failure that
+            # restarts the job)
+            if (
+                state.is_error()
+                and state.failure_reason == JobFailureStatus.TIMEOUT
+                and j.resumable
+            ):
                 j.retry_count += 1
 
         logger.debug("[job ended] Finalizing")
         await job.finalize_status(callback=finalize_callback)
 
-        # Check if we should restart a resumable task that timed out
+        # Restart a resumable task that timed out (aio_submit_inner reports
+        # the job when it has no retry left)
         if (
             state.is_error()
             and state.failure_reason == JobFailureStatus.TIMEOUT
             and job.resumable
-            and job.retry_count <= job.max_retries
         ):
             logger.info(
                 "Resumable task %s timed out - restarting (attempt %d/%d)",
@@ -1586,6 +1593,47 @@ class Scheduler(StateProvider, threading.Thread):
         # Notify scheduler listeners of job state after job completes
         self.notify_job_state(job)
         return state
+
+    def _retries_exhausted(self, job: Job) -> None:
+        """Report a resumable job that timed out with no retry left
+
+        The job is not restarted: a warning tells the user, with an action to
+        retry it anyway (with a fresh retry count).
+        """
+        from experimaestro.scheduler.state_status import WarningEvent
+
+        description = (
+            f"Job {job.task_id} ({job.identifier[:8]}) timed out"
+            f" {job.retry_count} time(s), the maximum number of retries"
+            f" (max_retries={job.max_retries}): it is not restarted."
+        )
+        logger.warning("%s", description)
+
+        xp = job.experiments[-1] if job.experiments else None
+        warning_key = f"retries_exhausted_{job.identifier}"
+
+        def retry():
+            job.reset_retries = True
+            self.submit(job)
+
+        warning_event = WarningEvent(
+            experiment_id=xp.experiment_id if xp is not None else "",
+            run_id=xp.run_id if xp is not None else "",
+            warning_key=warning_key,
+            description=description,
+            actions={"retry": "Retry anyway", "dismiss": "Dismiss"},
+            context={
+                "title": "Retries exhausted",
+                "task_id": job.task_id,
+                "job_id": job.identifier,
+                "retry_count": job.retry_count,
+                "max_retries": job.max_retries,
+            },
+        )
+        self.register_warning_actions(
+            warning_key, {"retry": retry, "dismiss": lambda: None}, warning_event
+        )
+        self._notify_state_listeners(warning_event)
 
     @staticmethod
     def _final_state(job: Job, process: "Process", code: int | None) -> JobState:

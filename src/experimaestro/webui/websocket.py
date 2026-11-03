@@ -21,6 +21,7 @@ from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import (
     display_state,
     failure_description,
+    retries_summary,
     status_rank,
 )
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported
@@ -187,6 +188,8 @@ def serialize_job(
     # Failure reason as shown by the TUI (icon) with its description
     payload["failureIcon"] = state.icon if state.failure_reason else None
     payload["failureDescription"] = failure_description(state)
+    # Retries of a resumable job (e.g. "3/3 — exhausted, not restarted")
+    payload["retries"] = retries_summary(job, state)
     return payload
 
 

@@ -288,6 +288,125 @@ def test_resumable_task_fails_after_max_retries():
 # =============================================================================
 
 
+class MockFailingProcess(MockTimeoutProcess):
+    """Process whose first N attempts fail with a given reason"""
+
+    def __init__(self, checkpoint_file: Path, count: int, reason: JobFailureStatus):
+        super().__init__(checkpoint_file, count)
+        self.reason = reason
+
+    def get_job_state(self, code: int) -> "JobState":
+        if int(self.checkpoint_file.read_text()) <= self.timeout_count:
+            return JobStateError(self.reason)
+        return JobState.DONE
+
+
+class MockFailingCommandLineJob(MockTimeoutCommandLineJob):
+    """CommandLineJob whose first ``timeout_count`` attempts fail with
+    ``REASON``, writing the ``.failed`` marker as a real job does"""
+
+    REASON = JobFailureStatus.FAILED
+
+    async def aio_run(self):
+        await super().aio_run()
+        if int(self.test_checkpoint_file.read_text()) <= self.timeout_count:
+            self.failedpath.write_text(
+                json.dumps({"code": 1, "reason": self.REASON.name.lower()})
+            )
+        return MockFailingProcess(
+            self.test_checkpoint_file, self.timeout_count, self.REASON
+        )
+
+
+class MockTimeoutMarkerCommandLineJob(MockFailingCommandLineJob):
+    """CommandLineJob whose first ``timeout_count`` attempts time out"""
+
+    REASON = JobFailureStatus.TIMEOUT
+
+
+def _mock_job(xp, job_class, *, max_retries, timeout_count):
+    checkpoint_file = xp.workspace.path / "checkpoint.txt"
+    task_config = CountingResumableTask.C(checkpoint=checkpoint_file)
+    job = job_class(
+        None,
+        task_config,
+        workspace=xp.workspace,
+        launcher=DirectLauncher(LocalConnector()),
+        max_retries=max_retries,
+        timeout_count=timeout_count,
+        checkpoint_file=checkpoint_file,
+    )
+    task_config.__xpm__.job = job
+    return job, checkpoint_file
+
+
+def test_resumable_task_failure_is_not_a_retry():
+    """A failure that is not a timeout neither counts as a retry nor prevents
+    the job from running again when resubmitted"""
+    with TemporaryExperiment("resumable_failure_retry", timeout_multiplier=9) as xp:
+        job, checkpoint_file = _mock_job(
+            xp, MockFailingCommandLineJob, max_retries=3, timeout_count=1
+        )
+
+        xp.submit(job)
+        state = job.wait()
+        assert isinstance(state, JobStateError)
+        assert state.failure_reason == JobFailureStatus.FAILED
+        assert job.retry_count == 0
+        assert int(checkpoint_file.read_text()) == 1
+
+        # Retry count left by earlier versions, which counted every failure
+        job.retry_count = 3
+        job.write_status()
+
+        # Resubmitted: the job runs again, with a fresh retry count
+        xp.submit(job)
+        assert job.wait() == JobState.DONE
+        assert int(checkpoint_file.read_text()) == 2
+        assert job.retry_count == 0
+
+
+def test_resumable_task_retries_exhausted_warning():
+    """A job with no retry left is reported by a warning, whose action
+    retries it anyway"""
+    from experimaestro.scheduler.job_status import retries_summary
+    from experimaestro.scheduler.state_status import WarningEvent
+
+    with TemporaryExperiment("resumable_exhausted", timeout_multiplier=9) as xp:
+        warnings = []
+        scheduler = xp.scheduler
+        scheduler.add_listener(
+            lambda event: isinstance(event, WarningEvent) and warnings.append(event)
+        )
+
+        job, checkpoint_file = _mock_job(
+            xp, MockTimeoutMarkerCommandLineJob, max_retries=2, timeout_count=2
+        )
+        xp.submit(job)
+        state = job.wait()
+        assert state.failure_reason == JobFailureStatus.TIMEOUT
+        assert job.retry_count == 2
+        assert int(checkpoint_file.read_text()) == 2
+        assert retries_summary(job, state) == "2/2 — exhausted, not restarted"
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.warning_key == f"retries_exhausted_{job.identifier}"
+        assert warning.experiment_id == xp.experiment_id
+        assert set(warning.actions) == {"retry", "dismiss"}
+
+        # Retry anyway: the job runs again (and now succeeds)
+        scheduler.execute_warning_action(warning.warning_key, "retry")
+        assert job.wait() == JobState.DONE
+        assert int(checkpoint_file.read_text()) == 3
+        assert job.retry_count == 0
+        assert retries_summary(job) == "0/2"
+
+        # The state written on disk tells offline UIs the retry limit
+        status = json.loads(job.status_path.read_text())
+        assert status["max_retries"] == 2
+
+
 def test_job_state_from_path_json_timeout(tmp_path):
     """Test JobState.from_path reads JSON format with timeout reason"""
     failed_file = tmp_path / "test.failed"
