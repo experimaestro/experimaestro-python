@@ -52,6 +52,7 @@ from experimaestro.scheduler.state_status import (
 from experimaestro.scheduler.liveness import (
     JobInUseError,
     experiment_is_live,
+    is_removal_leftover,
     remove_job_directory,
     run_is_live,
 )
@@ -2061,7 +2062,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             task_id = task_dir.name
 
             for job_dir in task_dir.iterdir():
-                if not job_dir.is_dir():
+                if not job_dir.is_dir() or is_removal_leftover(job_dir):
                     continue
 
                 total_on_disk += 1

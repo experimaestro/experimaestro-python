@@ -10,6 +10,7 @@ they destroy, without waiting, and refuse if it is held.
 import json
 import logging
 import shutil
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -119,13 +120,68 @@ def job_locked_for_removal(job: "BaseJob") -> Iterator[None]:
         lock.release()
 
 
+#: Suffix of a job directory renamed by :func:`remove_job_directory` before
+#: being removed (``.<job id>.removing-<random>``, next to the job directory)
+REMOVING_MARKER = ".removing-"
+
+
+def is_removal_leftover(path: Path) -> bool:
+    """Whether ``path`` is a job directory being (or not fully) removed"""
+    return path.name.startswith(".") and REMOVING_MARKER in path.name
+
+
 def remove_job_directory(job: "BaseJob") -> None:
     """Removes the directory of a job that does not run
 
+    The job lock lives in the job directory and is held while the directory is
+    changed: removing the directory while the lock file is open fails on NFS
+    (the open file is renamed ``.nfsXXXX`` and the directory is never empty).
+    The directory is thus renamed while the lock is held — the job path is
+    then free, a job starting afterwards creates a new directory — and removed
+    once the lock is released.
+
     Raises:
         JobInUseError: if the job runs or is being started
+        OSError: if the job directory cannot be renamed
     """
     if not job.path.exists():
         return
+    path = job.path
     with job_locked_for_removal(job):
-        shutil.rmtree(job.path)
+        removed = path.with_name(f".{path.name}{REMOVING_MARKER}{uuid.uuid4().hex[:8]}")
+        path.rename(removed)
+    remove_leftover(removed)
+
+
+def remove_leftover(path: Path) -> bool:
+    """Removes a job directory renamed by :func:`remove_job_directory`
+
+    Returns:
+        whether the directory was removed (a failure is logged: the directory
+        is removed by :func:`remove_removal_leftovers` later)
+    """
+    try:
+        shutil.rmtree(path)
+        return True
+    except OSError as e:
+        logger.warning("Could not fully remove %s (removed later): %s", path, e)
+        return False
+
+
+def remove_removal_leftovers(jobs_dir: Path) -> int:
+    """Removes the job directories that :func:`remove_job_directory` renamed
+    but could not remove (``jobs/<task id>/.<job id>.removing-*``)
+
+    Returns:
+        the number of directories removed
+    """
+    count = 0
+    if not jobs_dir.is_dir():
+        return 0
+    for task_dir in jobs_dir.iterdir():
+        if not task_dir.is_dir():
+            continue
+        for path in task_dir.iterdir():
+            if is_removal_leftover(path) and path.is_dir():
+                count += remove_leftover(path)
+    return count

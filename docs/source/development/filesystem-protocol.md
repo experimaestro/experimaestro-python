@@ -291,7 +291,7 @@ workspace provider shows it otherwise as ABORTED (derived, never written:
 
 | Operation | Guard |
 |---|---|
-| delete job (`jobs clean`, TUI, web) | cached state finished/unscheduled, then job lock (timeout 0) and no live process (`liveness.remove_job_directory`) |
+| delete job (`jobs clean`, TUI, web) | cached state finished/unscheduled, then job lock (timeout 0) and no live process; the directory is renamed `.<id>.removing-<random>` under the lock and removed once the lock is released — the lock file lives in it, and an open file blocks the removal on NFS (`liveness.remove_job_directory`; leftovers are removed by `orphans --clean`) |
 | delete experiment | experiment lock free; its jobs (`delete_jobs=True`) as delete job |
 | kill job | cached state; RPC path skips the check |
 | `workspace orphans --clean` | as delete job |

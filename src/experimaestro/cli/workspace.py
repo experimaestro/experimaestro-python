@@ -78,7 +78,11 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
 
     Uses the same orphan detection as the TUI (WorkspaceStateProvider.get_orphan_jobs).
     """
-    from experimaestro.scheduler.liveness import JobInUseError, remove_job_directory
+    from experimaestro.scheduler.liveness import (
+        JobInUseError,
+        remove_job_directory,
+        remove_removal_leftovers,
+    )
     from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
     from experimaestro.utils.disk_usage import folder_size, format_size
 
@@ -91,6 +95,10 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
 
     # Use WorkspaceStateProvider.get_orphan_jobs() - same as TUI
     provider = WorkspaceStateProvider.get_instance(path)
+    if clean:
+        # Job directories whose removal failed earlier
+        if leftovers := remove_removal_leftovers(path / "jobs"):
+            print(f"Removed {leftovers} partially removed job folder(s)")
     orphan_jobs = provider.get_orphan_jobs(include_folders=include_folders)
 
     if not orphan_jobs:
@@ -98,6 +106,7 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
         return
 
     print(f"Found {len(orphan_jobs)} orphan job(s):")
+    failed = 0
     for job in orphan_jobs:
         show(job)
         if clean:
@@ -106,6 +115,11 @@ def _orphans(path: Path, clean: bool, size: bool, include_folders: bool):
                 remove_job_directory(job)
             except JobInUseError as e:
                 print(f"  skipped: {e}")
+            except OSError as e:
+                failed += 1
+                print(f"  failed: {e}")
+    if failed:
+        print(f"{failed} orphan job(s) could not be removed")
 
 
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
