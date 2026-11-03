@@ -601,15 +601,14 @@ class ConfigInformation:
             for init_task in self.init_tasks:
                 init_task.__xpm__.validate()
 
-            # Use the (optional) __validate__ method
-            if hasattr(self.pyobject, "__validate__"):
-                try:
-                    self.pyobject.__validate__()
-                except Exception:
-                    logger.error(
-                        "Error while validating %s at %s", self.xpmtype, self._initinfo
-                    )
-                    raise
+            # Run the user-defined checks
+            try:
+                self.pyobject.__validate__()
+            except Exception:
+                logger.error(
+                    "Error while validating %s at %s", self.xpmtype, self._initinfo
+                )
+                raise
 
     def seal(self, context: ConfigWalkContext):
         """Seals the object and generate values when needed
@@ -2395,6 +2394,15 @@ class Config:
     __xpm__: ConfigInformation
     """Experimaestro information of this configuration (values, identifier,
     job, ...)"""
+
+    def __validate__(self):
+        """Validate the values (no-op by default)
+
+        Defined here rather than on :class:`ConfigMixin` so that it comes
+        after user classes in the MRO: overrides can always call
+        ``super().__validate__()``.
+        """
+        pass
 
     def __xpm_serialize__(
         self, context: "SerializationContext"

@@ -464,3 +464,21 @@ def test_validate_in_multilevel_hierarchy():
 
     ValidateChild.C(x=1).__xpm__.validate()
     ValidateParent.C().__xpm__.validate()
+
+
+class ValidateSuperChild(ValidateParent):
+    def __validate__(self):
+        super().__validate__()
+
+
+class ValidateSuperGrandChild(ValidateChild):
+    def __validate__(self):
+        super().__validate__()
+
+
+def test_validate_super_call():
+    """super().__validate__() works whether or not a parent overrides it"""
+    ValidateSuperChild.C().__xpm__.validate()
+    ValidateSuperGrandChild.C(x=1).__xpm__.validate()
+    with pytest.raises(ValueError, match="x must be >= 0"):
+        ValidateSuperGrandChild.C(x=-1).__xpm__.validate()
