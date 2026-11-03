@@ -297,9 +297,58 @@ reveal_type(result)  # Should be Output
     assert "INTERNAL ERROR" not in stdout
     assert "INTERNAL ERROR" not in stderr
 
-    # Check that submit returns the task_outputs return type
-    # The reveal_type should show Output
-    assert "Output" in stdout or "TaskWithOutputs" in stdout
+    # submit() returns the task_outputs return type, without any error (the
+    # generated submit() is not an incompatible override of Task.submit)
+    assert 'Revealed type is "test_code.Output"' in stdout
+    assert "error:" not in stdout
+
+
+def test_mypy_task_outputs_inherited():
+    """submit() returns the task outputs of a parent task, and of the task
+    itself when it redefines them"""
+    code = """
+from experimaestro import Task, Config, Param
+
+class Output(Config):
+    value: Param[int]
+
+class OtherOutput(Config):
+    value: Param[int]
+
+class Parent(Task):
+    x: Param[int]
+
+    def task_outputs(self, dep) -> Output:
+        return dep(Output.C(value=self.x))
+
+    def execute(self):
+        pass
+
+class Child(Parent):
+    pass
+
+class Redefined(Parent):
+    def task_outputs(self, dep) -> OtherOutput:  # type: ignore[override]
+        return dep(OtherOutput.C(value=self.x))
+
+class Plain(Task):
+    def execute(self):
+        pass
+
+reveal_type(Child.C(x=1))
+reveal_type(Child.C(x=1).submit())
+reveal_type(Redefined.C(x=1).submit())
+reveal_type(Plain.C().submit())
+"""
+    _, stdout, stderr = run_mypy(code)
+
+    assert "INTERNAL ERROR" not in stdout + stderr
+    assert 'Revealed type is "test_code.Output"' in stdout
+    assert 'Revealed type is "test_code.OtherOutput"' in stdout
+    assert 'Revealed type is "test_code.Plain"' in stdout
+    # A subclass of a task has its own C
+    assert 'Revealed type is "test_code.Child"' in stdout
+    assert "error:" not in stdout, stdout
 
 
 def test_mypy_submit_with_arguments():

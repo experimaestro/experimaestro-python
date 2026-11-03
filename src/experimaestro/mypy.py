@@ -29,12 +29,14 @@ from mypy.nodes import (
     ARG_NAMED_OPT,
     ARG_NAMED,
 )
-from mypy.plugin import Plugin, ClassDefContext
+from mypy.plugin import Plugin, ClassDefContext, MethodContext
 from mypy.plugins.common import add_attribute_to_class, add_method_to_class
 from mypy.types import (
     Instance,
     TypeType,
     NoneType,
+    Type,
+    get_proper_type,
 )
 from mypy.mro import calculate_mro, MroError
 
@@ -288,27 +290,42 @@ def _add_init_method(ctx: ClassDefContext) -> None:
         )
 
 
-def _get_task_outputs_return_type(info: TypeInfo) -> Instance | None:
-    """Check if the class has a task_outputs method and return its return type.
+def _get_task_outputs_return_type(info: TypeInfo) -> Type | None:
+    """Return type of the task_outputs method of a class (None if it has no
+    annotated task_outputs), looked up in the class and its ancestors
 
-    If the class defines task_outputs, submit() should return that type instead
-    of Self.
+    If the class defines task_outputs, submit() returns that type instead of
+    Self.
     """
-    # Look for task_outputs method in the class
-    if "task_outputs" in info.names:
-        sym = info.names["task_outputs"]
-        if sym.node is not None:
-            # Try to get the return type from the method signature
-            from mypy.nodes import FuncDef
+    from mypy.nodes import FuncDef
+    from mypy.types import CallableType
 
-            if isinstance(sym.node, FuncDef):
-                ret_type = sym.node.type
-                if ret_type is not None:
-                    from mypy.types import CallableType
-
-                    if isinstance(ret_type, CallableType):
-                        return ret_type.ret_type
+    for base in info.mro:
+        sym = base.names.get("task_outputs")
+        if sym is None:
+            continue
+        # The first definition in the MRO is the one used
+        if isinstance(sym.node, FuncDef) and isinstance(sym.node.type, CallableType):
+            return sym.node.type.ret_type
+        return None
     return None
+
+
+def _submit_return_type(ctx: MethodContext) -> Type:
+    """Type returned by submit(): the task outputs, if the task defines them
+
+    The generated submit() methods return Self, so that they are compatible
+    overrides of each other; the type of the task outputs (which is not a
+    subtype of the task) is given here, at each call.
+    """
+    receiver = get_proper_type(ctx.type)
+    if isinstance(receiver, Instance) and any(
+        base.fullname in CONFIG_FULLNAMES for base in receiver.type.mro
+    ):
+        outputs_type = _get_task_outputs_return_type(receiver.type)
+        if outputs_type is not None:
+            return outputs_type
+    return ctx.default_return_type
 
 
 def _add_configmixin_to_bases(ctx: ClassDefContext) -> None:
@@ -352,7 +369,10 @@ def _add_configmixin_to_bases(ctx: ClassDefContext) -> None:
 
 
 def _add_submit_method(ctx: ClassDefContext) -> None:
-    """Add submit() method that returns Self (or task_outputs return type).
+    """Add submit() method that returns Self
+
+    (the task_outputs return type, when defined, is given at each call by
+    :func:`_submit_return_type`)
 
     The actual submit() signature from ConfigMixin:
         def submit(self, *, workspace=None, launcher=None, run_mode=None,
@@ -360,14 +380,7 @@ def _add_submit_method(ctx: ClassDefContext) -> None:
     """
     info = ctx.cls.info
 
-    # Check if the class has task_outputs
-    task_outputs_type = _get_task_outputs_return_type(info)
-
-    # submit() returns task_outputs return type if defined, otherwise Self
-    if task_outputs_type is not None:
-        return_type = task_outputs_type
-    else:
-        return_type = Instance(info, [])
+    return_type = Instance(info, [])
 
     # Build submit() arguments - all optional kwargs
     from mypy.types import AnyType, TypeOfAny
@@ -439,12 +452,22 @@ class ExperimaestroPlugin(Plugin):
     def get_base_class_hook(
         self, fullname: str
     ) -> Callable[[ClassDefContext], None] | None:
-        """Hook called when a class inherits from Config.
-
-        This allows us to process classproperty attributes and add __init__.
+        """Hook called for each base of a class: processes the classes deriving
+        from Config, directly or not (so that the subclass of a task gets its
+        own C, __init__ and submit()).
         """
         if fullname in CONFIG_FULLNAMES:
             return _process_config_class
+        sym = self.lookup_fully_qualified(fullname)
+        if sym is not None and isinstance(sym.node, TypeInfo):
+            if any(base.fullname in CONFIG_FULLNAMES for base in sym.node.mro):
+                return _process_config_class
+        return None
+
+    def get_method_hook(self, fullname: str) -> Callable[[MethodContext], Type] | None:
+        """Hook called for method calls: submit() returns the task outputs"""
+        if fullname.endswith(".submit"):
+            return _submit_return_type
         return None
 
 
