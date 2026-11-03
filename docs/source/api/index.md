@@ -520,3 +520,32 @@ Type annotations are used to declare parameters in configurations and tasks.
 ```{eval-rst}
 .. autoclass:: experimaestro.click.forwardoption
 ```
+
+## Graph & DAG Visualization
+
+Visualization and export utilities for experiment runs, standalone serialized objects, and Hugging Face models.
+
+### load_serialized_graph
+
+```{eval-rst}
+.. autofunction:: experimaestro.ui.graph.load_serialized_graph
+```
+
+### to_mermaid
+
+```{eval-rst}
+.. autofunction:: experimaestro.ui.graph.to_mermaid
+```
+
+### standalone_html
+
+```{eval-rst}
+.. autofunction:: experimaestro.ui.graph.standalone_html
+```
+
+### ExperimentGraph
+
+```{eval-rst}
+.. autoclass:: experimaestro.ui.graph.ExperimentGraph
+   :members: view
+```

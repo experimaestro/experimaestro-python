@@ -20,6 +20,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from experimaestro.scheduler.interfaces import ExperimentJobInformation
@@ -62,6 +63,9 @@ class GraphNode:
     depends_on: list[str] = field(default_factory=list)
     """Identifiers of the nodes this one directly depends on"""
 
+    object_id: int | None = None
+    """Object ID in the serialized objects pool"""
+
     def state_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -70,6 +74,7 @@ class GraphNode:
             "taskId": self.task_id,
             "tags": self.tags,
             "dependsOn": self.depends_on,
+            "objectId": self.object_id,
         }
 
 
@@ -121,6 +126,9 @@ class ExperimentGraph:
     configs: list[dict[str, Any]] = field(default_factory=list)
     """Grid search configurations (tag values), see :func:`detect_grid_configs`"""
 
+    objects: dict[int, dict[str, Any]] = field(default_factory=dict)
+    """Serialized object definitions indexed by numeric ID"""
+
     @property
     def grid_keys(self) -> set[str]:
         return {k for c in self.configs for k in c}
@@ -131,6 +139,7 @@ class ExperimentGraph:
             "runId": self.run_id,
             "nodes": [n.state_dict() for n in self.nodes.values()],
             "configs": self.configs,
+            "objects": self.objects,
         }
 
     def index(self) -> dict[str, int]:
@@ -492,6 +501,115 @@ def load_experiment_graph(
     )
 
 
+def load_serialized_graph(
+    source: Path | str | list[dict[str, Any]] | dict[str, Any],
+    experiment_id: str | None = None,
+    run_id: str = "serialized",
+    *,
+    promote_sink_configs: bool = True,
+) -> ExperimentGraph:
+    """Build an ExperimentGraph from a serialized object file, directory, or data payload.
+
+    Supports:
+    - Path to ``experimaestro.json`` (e.g. Hugging Face exported model)
+    - Path to ``params.json`` (job parameters)
+    - Path to ``objects.jsonl`` (streaming records)
+    - Directory containing any of the above files
+    - Raw deserialized payload (``list[dict]`` or ``dict`` with ``"objects"``)
+
+    :param source: File path, directory path, or deserialized dictionary/list
+    :param experiment_id: Name/ID for the graph (defaults to directory or file name)
+    :param run_id: Run identifier (defaults to "serialized")
+    :param promote_sink_configs: Whether to promote terminal deliverable configs
+        (e.g. exported ModuleLoader / model config) to Action nodes so they
+        are displayed as the final pipeline stage in task-only views.
+    """
+    raw_objs: list[dict[str, Any]]
+    inferred_name = experiment_id
+
+    if isinstance(source, (str, Path)):
+        p = Path(source).expanduser()
+        if not p.exists():
+            raise FileNotFoundError(f"Serialized graph source not found: {source}")
+
+        if inferred_name is None:
+            s_str = str(source)
+            if m := re.search(r"models--([^/]+)--([^/]+)", s_str):
+                inferred_name = f"{m.group(1)}/{m.group(2)}"
+            elif p.is_dir():
+                inferred_name = p.name
+            else:
+                parent_name = p.parent.name
+                if parent_name in ("experimaestro.json", "params.json", "objects.jsonl") or p.name in ("experimaestro.json", "params.json", "objects.jsonl"):
+                    inferred_name = parent_name
+                else:
+                    inferred_name = p.stem
+
+        if p.is_dir():
+            cand = next(
+                (
+                    p / name
+                    for name in ("experimaestro.json", "params.json", "objects.jsonl")
+                    if (p / name).is_file()
+                ),
+                None,
+            )
+            if cand is None:
+                raise FileNotFoundError(
+                    f"No experimaestro.json, params.json, or objects.jsonl found in directory: {p}"
+                )
+            target_file = cand
+        else:
+            target_file = p
+
+        text = target_file.read_text(encoding="utf-8")
+        if target_file.suffix == ".jsonl" or target_file.name == "objects.jsonl":
+            raw_objs = [
+                json.loads(line) for line in text.splitlines() if line.strip()
+            ]
+        else:
+            payload = json.loads(text)
+            if isinstance(payload, list):
+                raw_objs = payload
+            elif isinstance(payload, dict):
+                raw_objs = payload.get("objects", [payload] if "id" in payload else [])
+            else:
+                raise ValueError(
+                    f"Unexpected JSON format in {target_file}: expected list or dict"
+                )
+    elif isinstance(source, list):
+        raw_objs = source
+        if inferred_name is None:
+            inferred_name = "serialized"
+    elif isinstance(source, dict):
+        raw_objs = source.get("objects", [source] if "id" in source else [])
+        if inferred_name is None:
+            inferred_name = "serialized"
+    else:
+        raise TypeError(f"Unsupported source type for serialized graph: {type(source)}")
+
+    graph = build_experiment_graph(
+        inferred_name or "serialized", run_id, raw_objs, {}, set()
+    )
+
+    if promote_sink_configs and len(graph.nodes) > 0:
+        dependents: dict[str, list[str]] = {n: [] for n in graph.nodes}
+        for n, node in graph.nodes.items():
+            for d in node.depends_on:
+                if d in dependents:
+                    dependents[d].append(n)
+
+        sink_configs = [
+            n
+            for n, deps in dependents.items()
+            if not deps and graph.nodes[n].kind == NodeKind.CONFIG
+        ]
+        for sink_id in sink_configs:
+            graph.nodes[sink_id].kind = NodeKind.ACTION
+
+    return graph
+
+
 def build_experiment_graph(
     experiment_id: str,
     run_id: str,
@@ -518,7 +636,12 @@ def build_experiment_graph(
         ident = identifier[oid]
         if ident in action_ids:
             return NodeKind.ACTION
-        if ident in jobs or oid in task_oids or objects[oid].get("init-tasks"):
+        if (
+            ident in jobs
+            or oid in task_oids
+            or objects[oid].get("init-tasks")
+            or objects[oid].get("stub")
+        ):
             return NodeKind.TASK
         if oid in init_oids:
             return NodeKind.INIT
@@ -564,26 +687,51 @@ def build_experiment_graph(
         job = jobs.get(ident)
         if job is not None:
             tags = dict(job.tags)
-        elif node_kind == NodeKind.CONFIG:
-            tags = _config_tags(o.get("fields", {}), grid_keys)
         else:
-            tags = {}
+            tags = _config_tags(o.get("fields", {}), grid_keys)
+
+        node_name = o.get("type") or str(o.get("typename", "?")).rsplit(".", 1)[-1]
+        if o.get("stub"):
+            node_name = f"{node_name} (stub)"
+
+        task_id = (
+            job.task_id
+            if job is not None
+            else (
+                o.get("typename") or f"{o.get('module', '')}.{o.get('type', '')}"
+                if node_kind.is_job
+                else None
+            )
+        )
+
         nodes[ident] = GraphNode(
             id=ident,
-            name=o.get("type") or str(o.get("typename", "?")).rsplit(".", 1)[-1],
+            name=node_name,
             kind=node_kind,
-            task_id=job.task_id if job is not None else None,
+            task_id=task_id,
             tags=tags,
             depends_on=list(found),
+            object_id=oid,
         )
 
     _remove_back_edges(nodes)
+
+    detected_configs = (
+        detect_grid_configs((job.task_id, job.tags) for job in jobs.values())
+        if jobs
+        else detect_grid_configs(
+            (n.task_id or "", n.tags)
+            for n in nodes.values()
+            if n.kind == NodeKind.TASK and n.tags
+        )
+    )
 
     return ExperimentGraph(
         experiment_id=experiment_id,
         run_id=run_id,
         nodes=nodes,
-        configs=detect_grid_configs((job.task_id, job.tags) for job in jobs.values()),
+        configs=detected_configs,
+        objects=objects,
     )
 
 
@@ -755,3 +903,43 @@ def standalone_html(
 </body>
 </html>
 """
+
+
+def to_mermaid(
+    graph: ExperimentGraph,
+    view: GraphView | None = None,
+    *,
+    tasks_only: bool = True,
+    stack: bool = True,
+    orientation: str = "TD",
+) -> str:
+    """Generate Mermaid flowchart markdown for the given graph or view.
+
+    :param graph: The experiment dependency graph
+    :param view: Explicit GraphView to render (if None, computed with tasks_only and stack)
+    :param tasks_only: Only show tasks/jobs if view is not provided
+    :param stack: Stack similar nodes if view is not provided
+    :param orientation: Flowchart orientation ("TD" or "LR")
+    """
+    if view is None:
+        has_tasks = any(n.kind == NodeKind.TASK for n in graph.nodes.values())
+        effective_tasks_only = tasks_only if has_tasks else False
+        view = graph.view(tasks_only=effective_tasks_only, stack=stack)
+
+    lines = [f"graph {orientation}"]
+    node_id_map: dict[str, str] = {}
+    for idx, vn in enumerate(view.nodes):
+        node_ref = f"node_{idx}"
+        node_id_map[vn.id] = node_ref
+        node = graph.nodes[vn.id]
+        label = node.name
+        if len(vn.members) > 1:
+            label += f" (×{len(vn.members)})"
+        safe_label = label.replace('"', '\\"')
+        lines.append(f'    {node_ref}["{safe_label}"]')
+
+    for s, t in view.edges:
+        if s in node_id_map and t in node_id_map:
+            lines.append(f"    {node_id_map[s]} --> {node_id_map[t]}")
+
+    return "\n".join(lines)

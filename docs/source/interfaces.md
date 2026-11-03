@@ -334,7 +334,7 @@ For example, `@state = 'error' and model = 'bm25'` selects the failed jobs whose
 
 When experiments run on remote servers (e.g., HPC clusters, cloud instances),
 you can monitor them from your local machine using SSH tunneling. Monitoring a
-[remote workspace](cli.md#remote-workspaces) establishes an SSH connection, starts a monitoring server on the remote
+[remote workspace](cli.md#remote-ssh-workspaces) establishes an SSH connection, starts a monitoring server on the remote
 host, and communicates via JSON-RPC over the SSH channel.
 
 ### Basic Usage
@@ -373,7 +373,7 @@ experimaestro --ssh myserver:/workspace --remote-xpm /opt/conda/bin/experimaestr
 | `--port PORT` | Port for local web server (default: 12345) |
 
 The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
-[Remote Workspaces](cli.md#remote-workspaces).
+[Remote Workspaces](cli.md#remote-ssh-workspaces).
 
 ### How It Works
 
@@ -558,8 +558,8 @@ experiment run: jobs coloured by status (with the progress of the running
 ones), init tasks (thin solid border, tinted background), the configurations
 linking them (optional, dashed border), stacks of similar nodes, and a grid
 search configuration selector. The graph follows the run: jobs submitted while
-it runs are added. Clicking a node highlights its lineage and lists its jobs,
-whose details can be opened.
+it runs are added. Clicking a node highlights its lineage and opens an interactive
+parameter inspector in the right panel.
 
 ```{figure} img/DAG_example.png
 :alt: Experimaestro DAG Web Viewer
@@ -567,13 +567,37 @@ whose details can be opened.
 Dependency graph: the selected stack of evaluations, with its lineage highlighted.
 ```
 
-The same view can be exported as a standalone HTML page:
+### Integrated Parameters Inspector
+
+Clicking any node or stack opens the inspector panel on the right:
+- **Hierarchical drill-down**: recursively expands nested sub-configurations, showing their
+  parameters, data paths, and initialization tasks while preventing circular references.
+- **Categorization**: automatically separates parameters into logical groups (*Hyperparameters*,
+  *Paths & Outputs*, *Sub-Configurations*, *Collections*, *Init Tasks*).
+- **Search & Highlighting**: filter parameters by name or value in real time. Matching text is
+  highlighted in yellow, collapsed parent configs auto-unfold, and a match counter (`1 of N`)
+  provides previous/next buttons (`▲` / `▼`) and keyboard shortcuts (`Enter` / `Shift+Enter`) to cycle matches.
+- **Code Generation**: switch between an interactive **Tree**, reproducible **Python (.C)**
+  synthesized code, or raw **JSON**.
+- **Stacked Runs**: for grouped nodes representing multiple runs (e.g. multi-seed evaluations),
+  member tabs (`#1`, `#2`, ...) allow inspecting individual run configurations.
+
+### Standalone HTML Export
+
+The same interactive view, including graph navigation and the full parameters inspector,
+can be exported as a completely self-contained HTML page that requires no server:
 
 ```bash
-experimaestro experiments dag my_experiment --html dag.html
+experimaestro dag my_experiment --html dag.html
 ```
 
-See [Experiment DAG Visualization](cli.md#experiment-dag-visualization-experimaestro-dag) in the CLI reference for details and options.
+It can also visualize standalone serialized models or Hugging Face Hub models without a workspace:
+
+```bash
+experimaestro dag VictorMorand/Mice-P-61m --html mice_dag.html
+```
+
+See [Experiment DAG Visualization](cli.md#experiment-dag-visualization) in the CLI reference for details and options.
 
 ## Failure details
 

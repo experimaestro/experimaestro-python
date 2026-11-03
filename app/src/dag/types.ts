@@ -4,6 +4,35 @@ export type NodeKind = "task" | "action" | "init" | "config";
 
 export type Tags = { [key: string]: unknown };
 
+export interface SerializedFieldRef {
+  type: "python";
+  value: number | string;
+}
+
+export interface SerializedPathRef {
+  type: "path" | "path.serialized";
+  value: string;
+  base?: "job" | "workspace" | "absolute" | string;
+}
+
+export interface SerializedEnumRef {
+  type: "enum";
+  enum: string;
+  value: string;
+}
+
+export interface SerializedObject {
+  id: number;
+  module?: string;
+  type?: string;
+  typename?: string;
+  identifier?: string;
+  task?: number;
+  "init-tasks"?: number[];
+  fields?: { [key: string]: unknown };
+  stub?: boolean;
+}
+
 export interface GraphNode {
   id: string;
   name: string;
@@ -11,6 +40,7 @@ export interface GraphNode {
   taskId: string | null;
   tags: Tags;
   dependsOn: string[];
+  objectId?: number;
 }
 
 export interface ExperimentGraph {
@@ -19,6 +49,8 @@ export interface ExperimentGraph {
   nodes: GraphNode[];
   // Grid search configurations (tag values)
   configs: Tags[];
+  // Serialized object pool indexed by numeric ID or string ID
+  objects?: { [id: string]: SerializedObject };
 }
 
 // A drawn node: members are positions in ExperimentGraph.nodes, the first one

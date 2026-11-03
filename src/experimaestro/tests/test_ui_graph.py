@@ -28,8 +28,10 @@ from experimaestro.ui.graph import (
     build_experiment_graph,
     detect_grid_configs,
     load_experiment_graph,
+    load_serialized_graph,
     run_progress,
     standalone_html,
+    to_mermaid,
     transitive_reduction,
 )
 
@@ -417,3 +419,73 @@ def test_graph_of_running_experiment(tmp_path):
     for stack in (False, True):
         view = graph.view(tasks_only=True, stack=stack)
         assert eval_id in reachable(view, learn_id), f"{view.edges=} ({stack=})"
+
+
+def test_load_serialized_graph_and_mermaid(tmp_path: Path):
+    """Test loading serialized object graphs from files and rendering to Mermaid"""
+    objects = [
+        obj(1, "Tokenizer", "tok", {"vocab_size": 30000}),
+        obj(2, "Learner", "base_learn", {}, stub=True),
+        obj(3, "InitTask", "init_model", {"tok": ref(1), "base": ref(2)}),
+        obj(
+            4,
+            "Train",
+            "train",
+            {"lr": 0.001, "epochs": 10},
+            task=4,
+            **{"init-tasks": [3]},
+        ),
+        obj(5, "ModelLoader", "output_loader", {"train": ref(4)}, task=4),
+    ]
+
+    # 1. experimaestro.json format (list)
+    exp_file = tmp_path / "experimaestro.json"
+    exp_file.write_text(json.dumps(objects), encoding="utf-8")
+
+    graph = load_serialized_graph(exp_file)
+    assert graph.nodes[h("base_learn")].name == "Learner (stub)"
+    assert graph.nodes[h("train")].tags == {"lr": 0.001, "epochs": 10}
+    assert graph.nodes[h("train")].object_id == 4
+    assert len(graph.objects) == len(objects)
+    state = graph.state_dict()
+    assert "objects" in state
+    assert len(state["objects"]) == len(objects)
+
+    # Sink config (ModelLoader) is promoted to ACTION so it appears in tasks-only view
+    assert graph.nodes[h("output_loader")].kind == NodeKind.ACTION
+
+    view = graph.view(tasks_only=True, stack=False)
+    assert h("output_loader") in [n.id for n in view.nodes]
+    assert (h("train"), h("output_loader")) in view.edges
+
+    # Mermaid diagram generation
+    mmd = to_mermaid(graph)
+    assert "graph TD" in mmd
+    assert 'Learner (stub)' in mmd
+    assert 'Train' in mmd
+    assert 'ModelLoader' in mmd
+
+    # 2. params.json format (dict with "objects")
+    params_file = tmp_path / "params.json"
+    params_file.write_text(json.dumps({"objects": objects, "version": 1}), encoding="utf-8")
+    graph_params = load_serialized_graph(params_file)
+    assert len(graph_params.nodes) == len(graph.nodes)
+
+    # 3. objects.jsonl format (streaming lines)
+    jsonl_file = tmp_path / "objects.jsonl"
+    jsonl_file.write_text("\n".join(json.dumps(o) for o in objects), encoding="utf-8")
+    graph_jsonl = load_serialized_graph(jsonl_file)
+    assert len(graph_jsonl.nodes) == len(graph.nodes)
+
+    # 4. Pure configs without tasks
+    pure_configs = [
+        obj(10, "ConfigA", "cfg_a", {"dim": 128}),
+        obj(11, "ConfigB", "cfg_b", {"cfg_a": ref(10)}),
+    ]
+    pure_file = tmp_path / "pure_configs.json"
+    pure_file.write_text(json.dumps(pure_configs), encoding="utf-8")
+    graph_pure = load_serialized_graph(pure_file)
+    mmd_pure = to_mermaid(graph_pure)
+    assert "ConfigA" in mmd_pure
+    assert "ConfigB" in mmd_pure
+

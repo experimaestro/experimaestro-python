@@ -38,6 +38,77 @@ def _open_provider(workspace: str | None, experiment_id: str | None) -> StatePro
     return WorkspaceStateProvider(ws.path, no_cleanup=True)
 
 
+def _load_graph(
+    target: str | None,
+    run_id: str | None,
+    workspace: str | None,
+):
+    """Resolve and load the graph from a file, HF repo, job or experiment"""
+    from experimaestro.cli.experiments import _select_experiment
+    from experimaestro.ui.graph import (
+        load_experiment_graph,
+        load_serialized_graph,
+        run_progress,
+        run_statuses,
+    )
+
+    # 1. Local path: file or directory
+    if target:
+        p = Path(target).expanduser()
+        if p.exists():
+            try:
+                graph = load_serialized_graph(p)
+                statuses = {n.id: "done" for n in graph.nodes.values() if n.kind.is_job}
+                return graph, statuses, {}
+            except Exception as e:
+                cprint(f"Error loading serialized graph from {target}: {e}", "red")
+                raise click.exceptions.Exit(1)
+
+    # 2. Hugging Face repository ID (e.g. VictorMorand/Mice-P-61m)
+    if target and "/" in target:
+        try:
+            from huggingface_hub import hf_hub_download
+
+            cprint(f"Resolving experimaestro.json from Hugging Face Hub: {target}...", "cyan")
+            hf_file = Path(hf_hub_download(repo_id=target, filename="experimaestro.json"))
+            graph = load_serialized_graph(hf_file, experiment_id=target)
+            statuses = {n.id: "done" for n in graph.nodes.values() if n.kind.is_job}
+            return graph, statuses, {}
+        except ImportError:
+            pass
+        except Exception:
+            # Not an HF model or download failed; fall through to workspace check
+            pass
+
+    # 3. Workspace (job or experiment)
+    provider = _open_provider(workspace, target)
+    try:
+        if target and (":" in target or "/" in target):
+            try:
+                from experimaestro.tools.inspect_params.discovery import find_job_params_file
+
+                params_path = find_job_params_file(provider, target)
+                graph = load_serialized_graph(params_path)
+                statuses = {n.id: "done" for n in graph.nodes.values() if n.kind.is_job}
+                return graph, statuses, {}
+            except Exception:
+                pass
+
+        exp = _select_experiment(provider, target)
+        if exp is None:
+            raise click.exceptions.Exit(1)
+        try:
+            graph = load_experiment_graph(provider, exp.experiment_id, run_id)
+        except FileNotFoundError as e:
+            cprint(f"No dependency graph for this run: {e}", "red")
+            raise click.exceptions.Exit(1)
+        statuses = run_statuses(provider, exp.experiment_id, run_id)
+        progress = run_progress(provider, exp.experiment_id, run_id)
+        return graph, statuses, progress
+    finally:
+        provider.close()
+
+
 def _parse_filter(spec: str) -> dict[str, object]:
     """Parse ``key=value,...`` (values are read as JSON when possible)"""
     tags: dict[str, object] = {}
@@ -53,7 +124,7 @@ def _parse_filter(spec: str) -> dict[str, object]:
 
 
 @click.command(name="dag")
-@click.argument("experiment_id", required=False, default=None)
+@click.argument("target", required=False, default=None)
 @click.option("-r", "--run", "run_id", default=None, help="Run ID (default: current)")
 @click.option(
     "-w",
@@ -67,6 +138,15 @@ def _parse_filter(spec: str) -> dict[str, object]:
     type=click.Path(path_type=Path),
     default=None,
     help="Save the graph as a standalone HTML page",
+)
+@click.option(
+    "--mermaid",
+    "mermaid_path",
+    type=click.Path(path_type=Path, allow_dash=True),
+    is_flag=False,
+    flag_value="-",
+    default=None,
+    help="Save the graph as a Mermaid diagram ('-' for stdout)",
 )
 @click.option(
     "--json",
@@ -104,10 +184,11 @@ def _parse_filter(spec: str) -> dict[str, object]:
     help="With --tree, stack similar nodes (default: stacked)",
 )
 def dag(
-    experiment_id: str | None,
+    target: str | None,
     run_id: str | None,
     workspace: str | None,
     html_path: Path | None,
+    mermaid_path: Path | None,
     json_path: Path | None,
     tree: bool,
     list_configs: bool,
@@ -116,41 +197,33 @@ def dag(
     all_nodes: bool,
     stack: bool,
 ) -> None:
-    """Show the dependency graph of an experiment
+    """Show the dependency graph of an experiment, serialized object, or model.
+
+    TARGET can be an experiment ID, a path to a file (experimaestro.json,
+    params.json, objects.jsonl), an exported model directory, or a Hugging
+    Face model repository (e.g. 'VictorMorand/Mice-P-61m').
 
     By default, the graph is opened in the browser as a standalone page (the
     same view as the web UI graph).
 
     \b
     Examples:
-      experimaestro experiments dag my_experiment                  # Open in the browser
-      experimaestro experiments dag my_experiment --html dag.html  # Save a standalone page
-      experimaestro experiments dag my_experiment --tree -c 0      # Print configuration #0
-      experimaestro experiments dag my_experiment --json -         # Dump as JSON
+      experimaestro dag my_experiment                     # Open in the browser
+      experimaestro dag /path/to/experimaestro.json       # Inspect serialized object
+      experimaestro dag VictorMorand/Mice-P-61m           # Inspect Hugging Face model
+      experimaestro dag my_model/ --mermaid               # Output Mermaid flowchart
+      experimaestro dag my_experiment --html dag.html     # Save a standalone page
+      experimaestro dag my_experiment --tree -c 0         # Print configuration #0
+      experimaestro dag my_experiment --json -            # Dump as JSON
     """
-    from experimaestro.cli.experiments import _select_experiment
     from experimaestro.ui.graph import (
+        NodeKind,
         export_state,
-        load_experiment_graph,
-        run_progress,
-        run_statuses,
         standalone_html,
+        to_mermaid,
     )
 
-    provider = _open_provider(workspace, experiment_id)
-    try:
-        exp = _select_experiment(provider, experiment_id)
-        if exp is None:
-            raise click.exceptions.Exit(1)
-        try:
-            graph = load_experiment_graph(provider, exp.experiment_id, run_id)
-        except FileNotFoundError as e:
-            cprint(f"No dependency graph for this run: {e}", "red")
-            raise click.exceptions.Exit(1)
-        statuses = run_statuses(provider, exp.experiment_id, run_id)
-        progress = run_progress(provider, exp.experiment_id, run_id)
-    finally:
-        provider.close()
+    graph, statuses, progress = _load_graph(target, run_id, workspace)
 
     if list_configs:
         for ix, config in enumerate(graph.configs):
@@ -162,6 +235,18 @@ def dag(
     if json_path is not None:
         with click.open_file(str(json_path), "w") as out:
             json.dump(export_state(graph, statuses, progress), out)
+
+    if mermaid_path is not None:
+        has_tasks = any(n.kind == NodeKind.TASK for n in graph.nodes.values())
+        view = graph.view(
+            tasks_only=not all_nodes if has_tasks else False, stack=stack
+        )
+        mmd = to_mermaid(graph, view)
+        if str(mermaid_path) == "-":
+            click.echo(mmd)
+        else:
+            Path(mermaid_path).write_text(mmd, encoding="utf-8")
+            cprint(f"Mermaid diagram saved to {mermaid_path}", "green")
 
     if html_path is not None:
         html_path.write_text(
@@ -177,7 +262,10 @@ def dag(
             raise click.BadParameter(
                 f"Configuration {config_index} does not exist (see --list-configs)"
             )
-        view = graph.view(config, tasks_only=not all_nodes, stack=stack)
+        has_tasks = any(n.kind == NodeKind.TASK for n in graph.nodes.values())
+        view = graph.view(
+            config, tasks_only=not all_nodes if has_tasks else False, stack=stack
+        )
         for depth, stage in enumerate(graph.stages(view)):
             cprint(f"Stage {depth}", "cyan")
             for vn in stage:
@@ -191,7 +279,12 @@ def dag(
                     + (f"  {tags}" if tags else "")
                 )
 
-    if html_path is None and json_path is None and not tree:
+    if (
+        html_path is None
+        and json_path is None
+        and mermaid_path is None
+        and not tree
+    ):
         with tempfile.NamedTemporaryFile(
             "w", suffix=".html", prefix="xpm-dag-", delete=False, encoding="utf-8"
         ) as out:

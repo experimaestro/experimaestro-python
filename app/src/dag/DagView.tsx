@@ -17,6 +17,7 @@ import "reactflow/dist/style.css";
 import dagre from "@dagrejs/dagre";
 
 import "./dag.css";
+import { ParamsInspector } from "./ParamsInspector";
 import {
   ExperimentGraph,
   GraphNode,
@@ -245,50 +246,87 @@ const Details = ({
   onOpenJob?: (node: GraphNode) => void;
   onClose: () => void;
 }) => {
+  const [activeIdx, setActiveIdx] = useState(0);
+  const [isWide, setIsWide] = useState(false);
+
+  // Clamp active index
+  const safeIdx = Math.min(Math.max(activeIdx, 0), members.length - 1);
+  const activeMember = graph.nodes[members[safeIdx]];
+  const activeStatus = isJob(activeMember) ? statusOf(activeMember.id) : undefined;
   const first = graph.nodes[members[0]];
+
   return (
-    <div className="xpm-dag-details">
+    <div className={`xpm-dag-details ${isWide ? "xpm-dag-details-wide" : ""}`}>
       <div className="xpm-dag-details-header">
         <strong>{first.name}</strong>
         <span className="xpm-dag-kind">{first.kind}</span>
-        {members.length > 1 && <span>×{members.length}</span>}
-        <button className="xpm-dag-close" onClick={onClose} title="Close">
-          ×
-        </button>
+        {members.length > 1 && <span className="xpm-dag-count">×{members.length}</span>}
+        <div className="xpm-dag-header-actions">
+          <button
+            className="xpm-dag-btn-icon"
+            onClick={() => setIsWide(!isWide)}
+            title={isWide ? "Narrow panel" : "Widen panel"}
+          >
+            {isWide ? "⇤" : "⇥"}
+          </button>
+          <button className="xpm-dag-close" onClick={onClose} title="Close">
+            ×
+          </button>
+        </div>
       </div>
-      {members.map((ix) => {
-        const node = graph.nodes[ix];
-        const status = isJob(node) ? statusOf(node.id) : undefined;
-        return (
-          <div key={node.id} className="xpm-dag-member">
-            <div className="xpm-dag-member-header">
-              {status && (
-                <span
-                  className="xpm-dag-status"
-                  style={{ background: statusColor(status) }}
-                >
-                  {status}
-                </span>
-              )}
-              <code title={node.id}>{node.id.slice(0, 12)}…</code>
-              {onOpenJob && node.taskId && (
-                <button className="xpm-dag-open" onClick={() => onOpenJob(node)}>
-                  details
-                </button>
-              )}
-            </div>
-            {node.taskId && <div className="xpm-dag-taskid">{node.taskId}</div>}
-            <div className="xpm-dag-tags">
-              {tagList(node.tags).map(([k, v]) => (
-                <span key={k} className="xpm-dag-tag">
-                  <span className="xpm-dag-tag-name">{k}</span>
-                  <span className="xpm-dag-tag-value">{v}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+
+      {members.length > 1 && (
+        <div className="xpm-dag-member-tabs">
+          {members.map((ix, idx) => {
+            const mNode = graph.nodes[ix];
+            const mStatus = isJob(mNode) ? statusOf(mNode.id) : undefined;
+            return (
+              <button
+                key={mNode.id}
+                className={`xpm-dag-member-tab ${idx === safeIdx ? "active" : ""}`}
+                onClick={() => setActiveIdx(idx)}
+                title={`${mNode.taskId || mNode.id} (${mStatus || "unknown"})`}
+              >
+                {mStatus && (
+                  <span
+                    className="xpm-dag-tab-dot"
+                    style={{ background: statusColor(mStatus) }}
+                  />
+                )}
+                #{idx + 1}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="xpm-dag-member-header">
+        {activeStatus && (
+          <span
+            className="xpm-dag-status"
+            style={{ background: statusColor(activeStatus) }}
+          >
+            {activeStatus}
+          </span>
+        )}
+        <code title={activeMember.id}>{activeMember.id.slice(0, 12)}…</code>
+        {onOpenJob && activeMember.taskId && (
+          <button className="xpm-dag-open" onClick={() => onOpenJob(activeMember)}>
+            details
+          </button>
+        )}
+      </div>
+
+      {activeMember.taskId && (
+        <div className="xpm-dag-taskid">{activeMember.taskId}</div>
+      )}
+
+      <ParamsInspector
+        node={activeMember}
+        objects={graph.objects}
+        status={activeStatus}
+        onOpenJob={onOpenJob}
+      />
     </div>
   );
 };
