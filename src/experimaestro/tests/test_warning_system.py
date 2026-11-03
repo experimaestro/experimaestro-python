@@ -457,3 +457,59 @@ class TestExperimentFinalizeStatus:
             status_path = run_dir / "status.json"
             status_data = json.loads(status_path.read_text())
             assert status_data["status"] == "done"
+
+
+# =============================================================================
+# Tests: stale locks found while starting a job
+# =============================================================================
+
+
+def test_stale_lock_warning_when_starting_a_job():
+    """A stale lock found while starting a job is reported with a warning
+    (of the job's experiment), and the job waits"""
+    import asyncio
+
+    from experimaestro import Task
+    from experimaestro.scheduler import JobState
+    from experimaestro.scheduler.dependencies import Dependency
+    from experimaestro.scheduler.workspace import RunMode
+    from experimaestro.tests.utils import TemporaryExperiment
+
+    class SomeTask(Task):
+        def execute(self):
+            pass
+
+    class StaleDependency(Dependency):
+        def is_dynamic(self) -> bool:
+            return True
+
+        async def aio_lock(self, timeout: float = 0):
+            raise StaleLockError(
+                warning_key="stale_locks_test",
+                description="Found 1 stale lock",
+                actions={"dismiss": "Dismiss"},
+                context={},
+                callbacks={"dismiss": lambda: None},
+            )
+
+    with TemporaryExperiment("stale_lock_warning") as xp:
+        task = SomeTask.C().submit(run_mode=RunMode.DRY_RUN)
+        job = task.__xpm__.job
+        xp.add_job(job)
+        job.dependencies.add(StaleDependency(None))
+
+        warnings = []
+        scheduler = xp.scheduler
+        scheduler.add_listener(
+            lambda event: isinstance(event, WarningEvent) and warnings.append(event)
+        )
+
+        state = asyncio.run_coroutine_threadsafe(
+            scheduler.aio_start(job), scheduler.loop
+        ).result(timeout=30)
+
+        assert state == JobState.WAITING
+        assert len(warnings) == 1
+        assert warnings[0].warning_key == "stale_locks_test"
+        assert warnings[0].experiment_id == xp.experiment_id
+        assert warnings[0].run_id == xp.run_id

@@ -1388,9 +1388,12 @@ class Scheduler(StateProvider, threading.Thread):
                                                 WarningEvent,
                                             )
 
+                                            experiment_id, run_id = (
+                                                self._job_experiment(job)
+                                            )
                                             warning_event = WarningEvent(
-                                                experiment_id=job.experiment_id,
-                                                run_id=job.experiment.run_id,
+                                                experiment_id=experiment_id,
+                                                run_id=run_id,
                                                 warning_key=e.warning_key,
                                                 description=e.description,
                                                 actions=e.actions,
@@ -1594,6 +1597,15 @@ class Scheduler(StateProvider, threading.Thread):
         self.notify_job_state(job)
         return state
 
+    @staticmethod
+    def _job_experiment(job: Job) -> tuple[str, str]:
+        """Experiment and run IDs a warning about a job belongs to: the last
+        experiment the job was submitted in (empty if none)"""
+        if not job.experiments:
+            return "", ""
+        xp = job.experiments[-1]
+        return xp.experiment_id, xp.run_id
+
     def _retries_exhausted(self, job: Job) -> None:
         """Report a resumable job that timed out with no retry left
 
@@ -1609,7 +1621,7 @@ class Scheduler(StateProvider, threading.Thread):
         )
         logger.warning("%s", description)
 
-        xp = job.experiments[-1] if job.experiments else None
+        experiment_id, run_id = self._job_experiment(job)
         warning_key = f"retries_exhausted_{job.identifier}"
 
         def retry():
@@ -1617,8 +1629,8 @@ class Scheduler(StateProvider, threading.Thread):
             self.submit(job)
 
         warning_event = WarningEvent(
-            experiment_id=xp.experiment_id if xp is not None else "",
-            run_id=xp.run_id if xp is not None else "",
+            experiment_id=experiment_id,
+            run_id=run_id,
             warning_key=warning_key,
             description=description,
             actions={"retry": "Retry anyway", "dismiss": "Dismiss"},
