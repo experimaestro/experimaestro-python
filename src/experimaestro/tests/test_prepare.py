@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -505,3 +506,109 @@ def test_prepare_inprocess_honours_is_prepared(files):
 
     assert files.calls == 0
     assert files.touch_path().is_file()
+
+
+# --- A Task that is its own Prepare ----------------------------------------
+#
+# A task can prepare its own resources (e.g. download what it needs on the
+# machine running the experimental plan) by also being a ``Prepare``: its
+# ``prepare()`` must run in the driver, before the job is launched, and never
+# in the job process.
+
+
+class SelfPreparingTask(Task, Prepare):
+    """A task whose ``prepare()`` writes the marker that ``execute()`` needs"""
+
+    marker: Param[Path]
+    log: Param[Path]
+    touch: Param[Path]
+    variant: Param[int]
+    """Distinguishes tasks (paths do not take part in identifiers)"""
+
+    def prepare(self, *args, **kwargs) -> None:
+        with self.log.open("a") as out:
+            out.write(f"{os.getpid()}\n")
+        self.marker.write_text("prepared")
+
+    def execute(self):
+        assert self.marker.is_file(), "Task ran before its own prepare()"
+        self.touch.write_text(f"{os.getpid()}")
+
+
+class TaskUsingSelfPreparingTask(Task):
+    dependency: Param[SelfPreparingTask]
+    touch: Param[Path]
+
+    def execute(self):
+        assert self.dependency.touch.is_file(), "Ran before its dependency"
+        self.touch.write_text("done")
+
+
+def _self_preparing(files: PreparedFiles, variant: int) -> SelfPreparingTask:
+    return SelfPreparingTask.C(
+        marker=files.marker,
+        log=files.log,
+        touch=files.touch_path(variant),
+        variant=variant,
+    )
+
+
+def _prepare_pids(files: PreparedFiles) -> list[int]:
+    return [int(line) for line in files.log.read_text().splitlines() if line]
+
+
+def test_self_preparing_task_prepares_in_the_driver(files):
+    """prepare() runs once, in the driver, before the job runs (elsewhere)"""
+    with TemporaryExperiment("self-prepare", workdir=files.workdir):
+        task = _self_preparing(files, 1)
+        task.submit()
+        assert len(_prepare_deps(task)) == 1
+
+    assert _prepare_pids(files) == [os.getpid()]
+    touch = files.touch_path(1)
+    assert touch.is_file(), "The task did not run"
+    assert int(touch.read_text()) != os.getpid(), "The task ran in the driver"
+
+
+def test_self_preparing_task_as_dependency(files):
+    """A task depending on a self-preparing task runs after it"""
+    with TemporaryExperiment("self-prepare-dep", workdir=files.workdir):
+        task = _self_preparing(files, 2).submit()
+        TaskUsingSelfPreparingTask.C(
+            dependency=task, touch=files.data / "dependent-ran"
+        ).submit()
+
+    assert _prepare_pids(files) == [os.getpid()]
+    assert (files.data / "dependent-ran").is_file()
+
+
+def test_self_preparing_task_prepare_mode(files):
+    """PREPARE mode runs prepare() but not the task"""
+    with TemporaryExperiment(
+        "self-prepare-mode", workdir=files.workdir, run_mode=RunMode.PREPARE
+    ):
+        _self_preparing(files, 3).submit()
+
+    assert _prepare_pids(files) == [os.getpid()]
+    assert not files.touch_path(3).exists()
+
+
+def test_self_preparing_task_skipped_in_dry_run(files):
+    with TemporaryExperiment(
+        "self-prepare-dry", workdir=files.workdir, run_mode=RunMode.DRY_RUN
+    ):
+        _self_preparing(files, 4).submit()
+
+    assert not files.log.exists()
+
+
+def test_self_preparing_task_identifier():
+    """Being a Prepare does not make a task part of its own identifier"""
+    one = _self_preparing_config(5)
+    assert one.__identifier__().all == _self_preparing_config(5).__identifier__().all
+    assert one.__identifier__().all != _self_preparing_config(6).__identifier__().all
+
+
+def _self_preparing_config(variant: int) -> SelfPreparingTask:
+    path = Path("unused")
+    return SelfPreparingTask.C(marker=path, log=path, touch=path, variant=variant)
