@@ -59,14 +59,7 @@ root_doc = "index"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
-exclude_patterns = [
-    # The demo is a git submodule; skip the developer-only files that may
-    # appear if it was checked out with `uv sync` etc.
-    "demo/.venv/**",
-    "demo/uv.lock",
-    "demo/.git",
-    "demo/__pycache__/**",
-]
+exclude_patterns: list[str] = []
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
@@ -111,7 +104,5 @@ myst_substitutions = {
     )
 }
 
-# Enable heading anchors for cross-reference support
-# 4 levels: lets the walkthrough link to H4 subsections (e.g. "Launchers"
-# under "experiment.py" in demo/README.md).
+# Enable heading anchors for cross-reference support (down to H4)
 myst_heading_anchors = 4

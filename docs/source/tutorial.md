@@ -1,23 +1,63 @@
 # Walkthrough
 
-This walkthrough is based on the [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo) repository, which provides a complete working example of using experimaestro for hyperparameter search in deep learning.
+The [experimaestro-demo](https://github.com/experimaestro/experimaestro-demo)
+repository is a complete working example: a hyper-parameter search for a CNN
+on MNIST. Its [README](https://github.com/experimaestro/experimaestro-demo#readme)
+is the step-by-step tutorial; this page summarises what it covers.
 
-:::{tip} Running the walkthrough
-To follow along, clone the demo repository:
 ```bash
 git clone https://github.com/experimaestro/experimaestro-demo.git
 cd experimaestro-demo
 ```
-:::
 
----
+## Setup
 
-```{include} demo/README.md
-:start-after: <!-- doc:start -->
-:end-before: <!-- doc:end -->
+- **Workspace**: where the job folders are created. The demo ships a
+  `settings.yaml` whose workspace uses `triggers:` (here `"MNIST_*"`), so the
+  `MNIST_train` experiment picks it without any `--workspace` / `--workdir`
+  flag. See [Settings](settings.md).
+- **Launchers** (optional for this small experiment): how tasks are run.
+  `experimaestro launchers direct generate` writes a `launchers.py` for the
+  local machine (CPU, CUDA, MPS, with memory tokens);
+  `experimaestro launchers slurm generate` does the same for a SLURM cluster.
+  See [Launchers](launchers/index.md).
+
+## The experiment
+
+The code lives in `mnist_xp/`:
+
+- `learn.py` defines the **configurations** and **tasks**. `CNN` is a
+  `Config` whose `Param`s (number of layers, hidden dimension, kernel size)
+  determine its identifier; `Learn` and `Evaluate` are `Task`s, whose
+  `execute()` method is what the scheduler runs, and whose parameters can be
+  other configurations (the model, the data).
+  See [Configurations](experiments/config.md) and [Tasks](experiments/task.md).
+- `data.py` describes the MNIST dataset with
+  [datamaestro](https://datamaestro.readthedocs.io/en/latest/).
+- `experiment.py` builds the plan: it reads the configuration, picks a
+  launcher from a requirement string (`find_launcher("duration=1h &
+  cuda(mem=4G)*1 & cpu(cores=4)")`) and submits one `Learn` task (then its
+  evaluation) per combination of hyper-parameters.
+- `params.yaml` holds the experiment ID, the launcher requirements and the
+  hyper-parameter values of the grid.
+
+## Running it
+
+```bash
+# List what would run (done / not done / failed), and with which launcher
+uv run experimaestro run mnist_xp/params.yaml --run-mode dry_run
+
+# Run it, monitoring with the terminal UI (or --web)
+uv run experimaestro run mnist_xp/params.yaml --console
 ```
 
----
+Each task gets a folder `<workspace>/jobs/<task id>/<hash>/`, the hash being
+computed from its parameters: a task already run with the same parameters is
+not run again. The experiment can also be followed afterwards with
+`experimaestro monitor --console` (or `--web`).
+
+The demo's `ADVANCED.md` goes on with declarative grid search (`GridSearch`),
+post-experiment actions (exporting the best model) and task dependency graphs.
 
 ## Going further
 

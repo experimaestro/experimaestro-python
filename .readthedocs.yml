@@ -5,11 +5,6 @@
 # Required
 version: 2
 
-# Checkout submodules for tutorial content
-submodules:
-  include: all
-  recursive: true
-
 build:
   os: ubuntu-22.04
   tools:
