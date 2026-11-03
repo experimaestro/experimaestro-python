@@ -356,6 +356,8 @@ class Job(BaseJob, Resource):
             # Handle recovery from error (e.g., resubmit)
             if old_state.is_error() and not new_state.is_error():
                 xp.failedJobs.pop(self.identifier, None)
+                # A new failure will be reported again
+                xp._reported_failures.discard(self.identifier)
 
         # Clear process and progress when job finishes
         if new_state.finished():

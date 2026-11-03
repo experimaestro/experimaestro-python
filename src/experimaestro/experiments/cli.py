@@ -31,6 +31,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger("xpm.experiments.cli")
 
 
+def _raise_if_failed(xp: "Experiment") -> None:
+    """Raise FailedExperiment if jobs of the (finished) experiment failed
+
+    The experiment itself only logs its failed jobs (so that a script can go on
+    after them); the command line exits with a non-zero code.
+    """
+    if xp.failed:
+        from experimaestro.scheduler.experiment import FailedExperiment
+
+        raise FailedExperiment(f"Experiment failed: {xp.failure_summary()}")
+
+
 class ExperimentHelper:
     """Helper for experiments"""
 
@@ -572,6 +584,8 @@ def experiments_cli(  # noqa: C901
                         should_stop=lambda: getattr(xp.scheduler, "exitmode", False)
                     )
 
+            _raise_if_failed(xp)
+
         except HandledException as e:
             from experimaestro.scheduler.experiment import FailedExperiment
 
@@ -579,8 +593,9 @@ def experiments_cli(  # noqa: C901
                 # Re-raise to preserve exception info for the main thread
                 raise
             if isinstance(e, FailedExperiment):
-                # For failed experiments, just print the message (already logged details)
-                cprint(str(e), "red", file=sys.stderr)
+                # Nothing to add: the failed jobs and the summary were logged
+                # by the experiment, in this terminal
+                pass
             else:
                 # Show a concise error with the location from the original cause
                 import traceback
@@ -691,6 +706,7 @@ def experiments_cli(  # noqa: C901
                     xp.wait()
 
                 logger.info("Experiment thread completed")
+                _raise_if_failed(xp)
 
             except BaseException as e:
                 # Use BaseException to also catch SystemExit from sys.exit()

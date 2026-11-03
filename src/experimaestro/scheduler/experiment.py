@@ -815,6 +815,46 @@ class experiment(BaseExperiment):
         assert self.scheduler is not None and self.scheduler.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
 
+    def failed_jobs(self) -> tuple[list[Job], list[Job]]:
+        """The failed jobs of the experiment, as ``(failed, not_run)``: the
+        jobs that failed, and those not run because a dependency failed"""
+        from experimaestro.scheduler.jobs import JobFailureStatus
+
+        failed: list[Job] = []
+        not_run: list[Job] = []
+        for job in self.failedJobs.values():
+            # The scheduler state tells why: a job not run has no execution state
+            reason = job.scheduler_state.failure_reason
+            (not_run if reason == JobFailureStatus.DEPENDENCY else failed).append(job)
+        return failed, not_run
+
+    def failure_summary(self) -> str:
+        """Summary of the failed jobs, e.g. ``1 failed job (and 1 job not run
+        because of a failed dependency)``"""
+        failed, not_run = self.failed_jobs()
+        summary = f"{len(failed)} failed job{'s' if len(failed) != 1 else ''}"
+        if not_run:
+            summary += (
+                f" (and {len(not_run)} job{'s' if len(not_run) != 1 else ''}"
+                " not run because of a failed dependency)"
+            )
+        return summary
+
+    def _report_failed_jobs(self) -> None:
+        """Log the failed jobs not reported yet (wait() is called by the user
+        and when the experiment exits)"""
+        new = self.failedJobs.keys() - self._reported_failures
+        if not new:
+            return
+        self._reported_failures |= new
+        failed, _ = self.failed_jobs()
+        for job in failed:
+            if job.identifier in new:
+                logger.error(
+                    "Job %s failed, check the log file %s", job.relpath, job.stderr
+                )
+        logger.error("Experiment failed: %s", self.failure_summary())
+
     def wait(self):
         """Wait until the running processes have finished"""
 
@@ -834,32 +874,7 @@ class experiment(BaseExperiment):
             finally:
                 stop.cancel()
 
-            if self.failedJobs:
-                # Show some more information
-                from experimaestro.scheduler.jobs import (
-                    JobFailureStatus,
-                )
-
-                count = 0
-                for job in self.failedJobs.values():
-                    # Skip dependency failures - only log direct failures
-                    if job.state.is_error():
-                        if job.state.failure_reason != JobFailureStatus.DEPENDENCY:
-                            count += 1
-                            logger.error(
-                                "Job %s failed, check the log file %s",
-                                job.relpath,
-                                job.stderr,
-                            )
-                    else:
-                        # Should not happen, but count it anyway
-                        count += 1
-                        logger.error(
-                            "Job %s failed, check the log file %s",
-                            job.relpath,
-                            job.stderr,
-                        )
-                logger.error("Experiment Failed: %d failed jobs", count)
+            self._report_failed_jobs()
 
         future = asyncio.run_coroutine_threadsafe(awaitcompletion(), self.loop)
         future.result()
@@ -1073,6 +1088,8 @@ class experiment(BaseExperiment):
 
         # List of failed jobs
         self.failedJobs: dict[str, Job] = {}
+        # ...and those already reported by wait()
+        self._reported_failures: set[str] = set()
 
         # Exit mode when catching signals
         self.exitMode = False

@@ -10,6 +10,11 @@ The experiment is then started with
 experimaestro run full.yaml
 ```
 
+It exits with code 1 if jobs failed (their log files are listed), so that
+scripts and CI jobs can tell; a failed job does not stop the others. Within
+Python, the {py:class}`~experimaestro.experiment` context does not raise in
+that case: check `xp.failed` after `xp.wait()`.
+
 See the [CLI documentation](../cli.md#running-experiments) for all the options,
 and {py:class}`~experimaestro.experiments.cli.ExperimentHelper` for the helper
 passed to `run`. This mechanism can be extended to support more specific helpers

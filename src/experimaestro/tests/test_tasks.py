@@ -115,14 +115,26 @@ def test_foreign_type():
         assert a.stdout().read_text().strip() == "1"
 
 
-def test_fail_dep():
+def test_fail_dep(caplog):
     """Failing task... should cancel dependent"""
-    with TemporaryExperiment("failingdep") as xp:
-        fail = Fail.C().submit()
-        dep = FailConsumer.C(fail=fail).submit()
-        fail.touch()
+    with caplog.at_level(logging.ERROR, logger="xpm.experiment"):
+        with TemporaryExperiment("failingdep") as xp:
+            fail = Fail.C().submit()
+            dep = FailConsumer.C(fail=fail).submit()
+            fail.touch()
+            xp.wait()
+        # (and wait() again when the experiment exits)
 
     assert xp.failed
+    # The dependent job is not run, rather than failed
+    assert xp.failed_jobs() == ([fail.__xpm__.job], [dep.__xpm__.job])
+    assert xp.failure_summary() == (
+        "1 failed job (and 1 job not run because of a failed dependency)"
+    )
+    # Each failure is reported once, with the log file of the job that ran
+    messages = [r.getMessage() for r in caplog.records]
+    assert messages.count(f"Experiment failed: {xp.failure_summary()}") == 1
+    assert sum("check the log file" in m for m in messages) == 1
     assert fail.__xpm__.job.state == JobState.ERROR
     # dep never ran (dependency failed), so execution state stays UNSCHEDULED
     # but scheduler_state is ERROR (set by scheduler when dependency check failed)
