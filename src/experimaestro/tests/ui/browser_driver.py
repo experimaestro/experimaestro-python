@@ -662,8 +662,10 @@ class BrowserDriver:
             for node in await self.page.locator(".xpm-dag-node").all()
         }
 
-    async def services(self, experiment_id: str) -> dict[str, str]:
-        await self.open_experiment(experiment_id)
+    async def services(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        await self.open_experiment(experiment_id, run_id)
         await self._nav("Services")
         services = {}
         rows = self.page.locator(f"tr[data-experiment-id='{experiment_id}']")
@@ -674,9 +676,9 @@ class BrowserDriver:
         return services
 
     async def _service_action(
-        self, experiment_id: str, service_id: str, label: str
+        self, experiment_id: str, service_id: str, label: str, run_id: str | None
     ) -> Notification | None:
-        await self.services(experiment_id)
+        await self.services(experiment_id, run_id)
         row = self.page.locator(
             f"tr[data-experiment-id='{experiment_id}'][data-service-id='{service_id}']"
         )
@@ -702,14 +704,14 @@ class BrowserDriver:
         return active
 
     async def start_service(
-        self, experiment_id: str, service_id: str
+        self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
-        return await self._service_action(experiment_id, service_id, "Start")
+        return await self._service_action(experiment_id, service_id, "Start", run_id)
 
     async def stop_service(
-        self, experiment_id: str, service_id: str
+        self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
-        return await self._service_action(experiment_id, service_id, "Stop")
+        return await self._service_action(experiment_id, service_id, "Stop", run_id)
 
     async def connection_state(self) -> str | None:
         await self.settle()

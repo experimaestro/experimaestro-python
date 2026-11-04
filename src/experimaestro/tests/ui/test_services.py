@@ -64,9 +64,10 @@ async def test_services_of_a_former_run(ui):
     assert await ui.services("baseline", former) == {"notebook": "stopped"}
     assert await ui.services("baseline") == {"tensorboard": "stopped"}
 
-    # Not a service of the current run
-    assert await ui.start_service("baseline", "notebook") == Notification(
-        "error", "Service notebook not found"
+    # Not a service of the current run: not offered (browser), or refused
+    assert await ui.start_service("baseline", "notebook") in (
+        None,
+        Notification("error", "Service notebook not found"),
     )
     started = await ui.start_service("baseline", "notebook", former)
     assert started.severity == "info"
