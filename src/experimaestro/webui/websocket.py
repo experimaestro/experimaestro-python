@@ -280,10 +280,16 @@ def serialize_experiment(exp: BaseExperiment) -> dict[str, Any]:
 def serialize_service(service: BaseService) -> dict[str, Any]:
     """Serialize a service using ``full_state_dict()`` to frontend format."""
     d = service.full_state_dict()
+    run_id = service.run_id or ""
     return {
-        # Service ids are only unique within an experiment
-        "key": f"{service.experiment_id}/{service.id}",
+        # Service ids are unique per experiment and run
+        "key": (
+            f"{service.experiment_id}/{run_id}/{service.id}"
+            if run_id
+            else f"{service.experiment_id}/{service.id}"
+        ),
         "experimentId": service.experiment_id,
+        "runId": run_id,
         "id": d.get("service_id"),
         "description": d.get("description"),
         "state": d.get("state"),
@@ -661,13 +667,19 @@ class WebSocketHandler:
             )
         return payloads
 
-    async def _in_thread(self, function, *args):
+    async def _in_thread(self, function, *args, **kwargs):
         """Run blocking state provider reads outside the event loop
 
         They can take a while (e.g. over SSH): the other connections, and the
         messages already sent on this one, are not held up meanwhile.
         """
         loop = asyncio.get_running_loop()
+        if kwargs:
+            import functools
+
+            return await loop.run_in_executor(
+                None, functools.partial(function, *args, **kwargs)
+            )
         return await loop.run_in_executor(None, function, *args)
 
     def _jobs_payloads(
@@ -752,9 +764,10 @@ class WebSocketHandler:
         experiment, only the started services (shown on every page) are sent.
         """
         experiment_id = payload.get("experimentId")
+        run_id = payload.get("runId")
         if experiment_id:
             services = await self._in_thread(
-                self.state_provider.get_services, experiment_id
+                self.state_provider.get_services, experiment_id, run_id
             )
         else:
             services = await self._in_thread(self.state_provider.get_started_services)
@@ -1102,9 +1115,12 @@ class WebSocketHandler:
     async def _lookup_service(
         self, websocket: WebSocket, payload: dict[str, Any]
     ) -> BaseService | None:
-        """Service designated by a request (``experimentId`` and ``id``)"""
+        """Service designated by a request (``experimentId``, optional ``runId``, and ``id``)"""
         service = service_operations.find_service(
-            self.state_provider, payload.get("experimentId"), payload.get("id")
+            self.state_provider,
+            payload.get("experimentId"),
+            payload.get("id"),
+            run_id=payload.get("runId"),
         )
         if service is None:
             await self._notify(

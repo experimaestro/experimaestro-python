@@ -716,6 +716,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             "Discovered experiment: %s (%d events)", experiment_id, len(events)
         )
         self._invalidate_known_experiment_ids()
+        self._clear_experiment_cache(experiment_id)
 
         # Get current run and pre-load experiment into cache
         run_id = self.get_current_run(experiment_id)
@@ -744,9 +745,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if events:
             for event in events:
                 self._notify_state_listeners(event)
-            self._notify_state_listeners(
-                ExperimentUpdatedEvent(experiment_id=experiment_id)
-            )
+        self._notify_state_listeners(
+            ExperimentUpdatedEvent(experiment_id=experiment_id)
+        )
 
         return True  # Follow all experiments
 
@@ -1144,6 +1145,14 @@ class WorkspaceStateProvider(OfflineStateProvider):
         )
 
         run_id = self.get_current_run(experiment_id)
+        event_run_id = getattr(event, "run_id", "") or None
+        if event_run_id and run_id and event_run_id != run_id:
+            self._clear_experiment_cache(experiment_id)
+            self._notify_state_listeners(
+                ExperimentUpdatedEvent(experiment_id=experiment_id)
+            )
+            run_id = self.get_current_run(experiment_id)
+
         if run_id is None:
             return
 

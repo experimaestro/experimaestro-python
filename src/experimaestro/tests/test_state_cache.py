@@ -20,6 +20,8 @@ from experimaestro.scheduler.state_status import (
     ExperimentUpdatedEvent,
     JobStateChangedEvent,
     JobTag,
+    RunUpdatedEvent,
+    ServiceAddedEvent,
 )
 
 
@@ -446,3 +448,31 @@ def test_datetime_arguments_are_hashable(provider):
     provider.get_experiments(since=since)
     provider.get_experiments(since=since)
     assert provider.calls["experiments"] == 1
+
+
+def test_current_run_invalidated_on_new_run_event(provider):
+    """When a new run event arrives, cached current_run is dropped"""
+    provider.get_current_run("exp1")
+    assert provider.calls["current_run:exp1"] == 1
+
+    provider.get_current_run("exp1")
+    assert provider.calls["current_run:exp1"] == 1
+
+    provider.apply_event(RunUpdatedEvent(experiment_id="exp1", run_id="run2"))
+    provider.get_current_run("exp1")
+    assert provider.calls["current_run:exp1"] == 2
+
+
+def test_service_added_event_invalidates_services_cache(provider):
+    """When a service is added, cached services for that experiment/run are invalidated"""
+    provider.get_services("exp1", run_id="run1")
+    assert provider.calls["services:exp1"] == 1
+
+    provider.get_services("exp1", run_id="run1")
+    assert provider.calls["services:exp1"] == 1
+
+    provider.apply_event(
+        ServiceAddedEvent(experiment_id="exp1", run_id="run1", service_id="s1")
+    )
+    provider.get_services("exp1", run_id="run1")
+    assert provider.calls["services:exp1"] == 2

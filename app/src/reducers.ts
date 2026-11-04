@@ -134,10 +134,11 @@ export type OrphanJob = Job & {
 type ServiceStatus = "STOPPED" | "STARTING" | "RUNNING" | "STOPPING" | "ERROR";
 
 export type ServiceInformation = {
-  // Unique key ("<experiment>/<service>"): service ids are only unique within
-  // an experiment
+  // Unique key ("<experiment>/<run>/<service>" or "<experiment>/<service>"): service ids are only unique within
+  // an experiment and run
   key: string;
   experimentId: string;
+  runId?: string | null;
   id: string;
   description: string;
   state: ServiceStatus;
@@ -324,10 +325,25 @@ export const slice = createSlice({
 
     addExperiment(draft, action: PayloadAction<Experiment>) {
       const exp = action.payload;
+      const prevExp = draft.experiments.byId[exp.experiment_id];
+      const prevRunId = prevExp?.current_run_id;
       if (draft.experiments.byId[exp.experiment_id] === undefined) {
         draft.experiments.ids.push(exp.experiment_id);
       }
       draft.experiments.byId[exp.experiment_id] = exp;
+
+      // If the current run changed on the active experiment while viewing "current run",
+      // clear the cached jobs so they are refetched for the new run
+      if (
+        draft.currentExperiment === exp.experiment_id &&
+        draft.currentRun === null &&
+        exp.current_run_id &&
+        prevRunId &&
+        prevRunId !== exp.current_run_id
+      ) {
+        draft.jobs = { byId: {}, ids: [] };
+        draft.jobsRequested = [];
+      }
 
       // Set as current experiment if it's the first one, unless the route
       // names the experiment(s) shown
@@ -347,7 +363,19 @@ export const slice = createSlice({
     ) {
       const exp = action.payload;
       if (draft.experiments.byId[exp.experiment_id] !== undefined) {
+        const prevExp = draft.experiments.byId[exp.experiment_id];
+        const prevRunId = prevExp.current_run_id;
         _.merge(draft.experiments.byId[exp.experiment_id], exp);
+        if (
+          draft.currentExperiment === exp.experiment_id &&
+          draft.currentRun === null &&
+          exp.current_run_id &&
+          prevRunId &&
+          prevRunId !== exp.current_run_id
+        ) {
+          draft.jobs = { byId: {}, ids: [] };
+          draft.jobsRequested = [];
+        }
       }
     },
 

@@ -17,18 +17,27 @@ const STATE_COLOR: { [key: string]: string } = {
 const Services = () => {
   const services = useAppSelector((state) => state.db.services);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
+  const currentRun = useAppSelector((state) => state.db.currentRun);
+  const exp = useAppSelector((state) =>
+    currentExperiment ? state.db.experiments.byId[currentExperiment] : null
+  );
+  const currentRunId = exp?.current_run_id;
+  const effectiveRunId = currentRun || currentRunId || null;
   const connectionStatus = useAppSelector((state) => state.db.connectionStatus);
   const [logTarget, setLogTarget] = useState<LogTarget>();
 
-  // Only the services of the selected experiment are requested
+  // Only the services of the selected experiment and run are requested
   useEffect(() => {
     if (connectionStatus === "connected" && currentExperiment !== null)
-      client.request_services(currentExperiment);
-  }, [connectionStatus, currentExperiment]);
+      client.request_services(currentExperiment, currentRun);
+  }, [connectionStatus, currentExperiment, currentRun, currentRunId]);
 
-  const keys = services.ids.filter(
-    (key) => services.byId[key].experimentId === currentExperiment,
-  );
+  const keys = services.ids.filter((key) => {
+    const svc = services.byId[key];
+    if (svc.experimentId !== currentExperiment) return false;
+    if (effectiveRunId && svc.runId && svc.runId !== effectiveRunId) return false;
+    return true;
+  });
 
   return (
     <div className="mt-3">
@@ -81,7 +90,9 @@ const Services = () => {
                             className="me-1"
                             href={`/services/${encodeURIComponent(
                               experimentId,
-                            )}/${encodeURIComponent(id)}/`}
+                            )}/${encodeURIComponent(id)}/${
+                              svc.runId ? `?runId=${encodeURIComponent(svc.runId)}` : ""
+                            }`}
                             target="_blank"
                           >
                             Open
@@ -91,7 +102,7 @@ const Services = () => {
                           size="sm"
                           variant="outline-danger"
                           className="me-1"
-                          onClick={() => client.service_stop(experimentId, id)}
+                          onClick={() => client.service_stop(experimentId, id, svc.runId)}
                         >
                           Stop
                         </Button>
@@ -101,7 +112,7 @@ const Services = () => {
                         size="sm"
                         variant="outline-success"
                         className="me-1"
-                        onClick={() => client.service_start(experimentId, id)}
+                        onClick={() => client.service_start(experimentId, id, svc.runId)}
                       >
                         Start
                       </Button>
@@ -114,6 +125,7 @@ const Services = () => {
                           kind: "service",
                           experimentId,
                           serviceId: id,
+                          runId: svc.runId,
                           title: id,
                         })
                       }
