@@ -9,6 +9,7 @@ import { useMessages } from "./ui/messages";
 import { clearOnEscape, useShortcuts } from "./shortcuts";
 import { KeyHints, SortHeader, sortedMessage } from "./ui/sorting";
 import { ExperimentTags } from "./ui/tags";
+import { CollapseExpandIcon } from "./ui/icons";
 
 // Status computed by the server, shared with the TUI (status_category)
 const STATUS_INFO: { [key: string]: { icon: string; color: string } } = {
@@ -242,6 +243,18 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
     [shown, grouping],
   );
 
+  const allCollapsed =
+    groups !== null && groups.length > 0 && groups.every((g) => collapsed.has(g.name));
+
+  function toggleAllGroups() {
+    if (groups === null) return;
+    if (allCollapsed) {
+      setCollapsed(new Set());
+    } else {
+      setCollapsed(new Set(groups.map((g) => g.name)));
+    }
+  }
+
   if (experiments.ids.length === 0) {
     return (
       <p className="text-muted mt-3">
@@ -343,6 +356,22 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
       <h5 className="mb-3">Experiments</h5>
 
       <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
+        {groups !== null && (
+          <Button
+            size="sm"
+            variant="outline-secondary"
+            title={allCollapsed ? "Expand all groups" : "Collapse all groups"}
+            aria-label={allCollapsed ? "Expand all groups" : "Collapse all groups"}
+            onClick={toggleAllGroups}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <CollapseExpandIcon collapsed={allCollapsed} />
+          </Button>
+        )}
         <Form.Control
           id="searchexperiments"
           ref={searchInput}
@@ -392,26 +421,6 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
             </option>
           ))}
         </Form.Select>
-        {groups !== null && (
-          <>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              title="Expand all groups"
-              onClick={() => setCollapsed(new Set())}
-            >
-              <i className="fas fa-angles-down" />
-            </Button>
-            <Button
-              size="sm"
-              variant="outline-secondary"
-              title="Collapse all groups"
-              onClick={() => setCollapsed(new Set(groups.map((g) => g.name)))}
-            >
-              <i className="fas fa-angles-up" />
-            </Button>
-          </>
-        )}
       </div>
       <KeyHints
         hints={[
