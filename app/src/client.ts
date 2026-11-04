@@ -360,8 +360,10 @@ class Client {
   }
 
   // Services of an experiment (shown by the services page)
-  request_services(experimentId: string): void {
-    this.send("services", { experimentId });
+  request_services(experimentId: string, runId?: string | null): void {
+    const payload: any = { experimentId };
+    if (runId) payload.runId = runId;
+    this.send("services", payload);
   }
 
   request_runs(experimentId: string): void {
@@ -415,12 +417,16 @@ class Client {
     this.send("orphans.delete");
   }
 
-  service_start(experimentId: string, id: string): void {
-    this.send("service.start", { experimentId, id });
+  service_start(experimentId: string, id: string, runId?: string | null): void {
+    const payload: any = { experimentId, id };
+    if (runId) payload.runId = runId;
+    this.send("service.start", payload);
   }
 
-  service_stop(experimentId: string, id: string): void {
-    this.send("service.stop", { experimentId, id });
+  service_stop(experimentId: string, id: string, runId?: string | null): void {
+    const payload: any = { experimentId, id };
+    if (runId) payload.runId = runId;
+    this.send("service.stop", payload);
   }
 
   quit(): void {

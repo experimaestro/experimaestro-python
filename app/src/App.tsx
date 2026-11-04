@@ -219,7 +219,9 @@ export default () => {
             {/* The run below the experiment, so that both have room */}
             <div className="d-flex flex-column gap-1 ms-3">
               {isScoped(view) && <ExperimentSelector />}
-              {(view === "tasks" || view === "graph") && <RunSelector />}
+              {(view === "tasks" || view === "graph" || view === "services") && (
+                <RunSelector />
+              )}
             </div>
             <Button
               variant="outline-light"

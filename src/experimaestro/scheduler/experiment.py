@@ -126,6 +126,8 @@ class StateListener:
         state_dict = Service.serialize_state_dict(service.state_dict())
         service_class = f"{service.__class__.__module__}.{service.__class__.__name__}"
         event = ServiceAddedEvent(
+            experiment_id=self.experiment_id,
+            run_id=self.run_id,
             service_id=service.id,
             description=service.description(),
             service_class=service_class,
@@ -710,7 +712,12 @@ class experiment(BaseExperiment):
             self._status = ExperimentStatus.FAILED
 
         # Write RunCompletedEvent before closing the event writer
-        event = RunCompletedEvent(status=status, ended_at=datetime.now().isoformat())
+        event = RunCompletedEvent(
+            experiment_id=self.experiment_id,
+            run_id=self.run_id,
+            status=status,
+            ended_at=datetime.now().isoformat(),
+        )
         self._event_writer.write_event(event)
 
         # Close the event writer to flush any buffered events

@@ -24,7 +24,10 @@ async def proxy_service(
     Routes /services/{experiment_id}/{service_id}/{path} to the service's URL.
     """
     server = request.app.state.server
-    service = find_service(server.state_provider, experiment_id, service_id)
+    run_id = request.query_params.get("runId")
+    service = find_service(
+        server.state_provider, experiment_id, service_id, run_id=run_id
+    )
     if service is None:
         return Response(
             content=f"Service {service_id} not found",

@@ -48,7 +48,11 @@ export const ActiveServices = () => {
             {" / "}
             {svc.state === "RUNNING" ? (
               <a
-                href={`/services/${encodeURIComponent(experimentId)}/${encodeURIComponent(id)}/`}
+                href={`/services/${encodeURIComponent(
+                  experimentId,
+                )}/${encodeURIComponent(id)}/${
+                  svc.runId ? `?runId=${encodeURIComponent(svc.runId)}` : ""
+                }`}
                 target="_blank"
                 rel="noreferrer"
                 title={svc.description || "Open the service"}
@@ -69,7 +73,13 @@ export const ActiveServices = () => {
               className="p-0 ms-2"
               title="Logs"
               onClick={() =>
-                setLogTarget({ kind: "service", experimentId, serviceId: id, title: id })
+                setLogTarget({
+                  kind: "service",
+                  experimentId,
+                  serviceId: id,
+                  runId: svc.runId,
+                  title: id,
+                })
               }
             >
               <i className="fas fa-file-lines" />
@@ -79,7 +89,7 @@ export const ActiveServices = () => {
               variant="link"
               className="p-0 ms-2 text-danger"
               title="Stop"
-              onClick={() => client.service_stop(experimentId, id)}
+              onClick={() => client.service_stop(experimentId, id, svc.runId)}
             >
               <i className="fas fa-stop" />
             </Button>

@@ -118,7 +118,8 @@ def service_logs(request: Request, experiment_id: str, service_id: str, stream: 
     server = request.app.state.server
     state_provider = server.state_provider
 
-    service = find_service(state_provider, experiment_id, service_id)
+    run_id = request.query_params.get("runId")
+    service = find_service(state_provider, experiment_id, service_id, run_id=run_id)
     if service is None:
         return JSONResponse({"error": "service not found"}, status_code=404)
 

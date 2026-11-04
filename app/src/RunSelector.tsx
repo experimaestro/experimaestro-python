@@ -8,15 +8,18 @@ export const RunSelector: React.FC = () => {
   const navigate = useNavigate();
   const route = useAppSelector((s) => s.db.route);
   const currentExperiment = useAppSelector((s) => s.db.currentExperiment);
+  const currentRunId = useAppSelector((s) =>
+    currentExperiment ? s.db.experiments.byId[currentExperiment]?.current_run_id : null
+  );
   const currentRun = useAppSelector((s) => s.db.currentRun);
   const runs = useAppSelector((s) => s.db.runs);
 
-  // Fetch the run history whenever the selected experiment changes
+  // Fetch the run history whenever the selected experiment or its current run changes
   useEffect(() => {
     if (currentExperiment) {
       client.request_runs(currentExperiment);
     }
-  }, [currentExperiment]);
+  }, [currentExperiment, currentRunId]);
 
   if (!currentExperiment || runs.length <= 1) {
     return null;

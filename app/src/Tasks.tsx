@@ -10,6 +10,7 @@ import { useAppSelector, useNavigate } from "./store";
 import { useShortcuts } from "./shortcuts";
 import FilterInput from "./FilterInput";
 import { KeyHints, SortHeader, SortLabel, sortedMessage } from "./ui/sorting";
+import { CollapseExpandIcon } from "./ui/icons";
 
 type SortKey = "status" | "task" | "date" | "name";
 
@@ -332,6 +333,18 @@ export default () => {
     setCollapsed(new Set());
   }
 
+  const allCollapsed =
+    groups !== null && groups.length > 0 && groups.every((g) => collapsed.has(g.key));
+
+  function toggleAllGroups() {
+    if (groups === null) return;
+    if (allCollapsed) {
+      setCollapsed(new Set());
+    } else {
+      setCollapsed(new Set(groups.map((g) => g.key)));
+    }
+  }
+
   // --- Job actions
 
   function cancelConfirm() {
@@ -374,6 +387,21 @@ export default () => {
               flexWrap: "wrap",
             }}
           >
+            {groups !== null && (
+              <Button
+                variant="outline-secondary"
+                title={allCollapsed ? "Expand all groups" : "Collapse all groups"}
+                aria-label={allCollapsed ? "Expand all groups" : "Collapse all groups"}
+                onClick={toggleAllGroups}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <CollapseExpandIcon collapsed={allCollapsed} />
+              </Button>
+            )}
             <Form.Group style={{ flex: "1 1 24rem" }}>
               <Form.Label htmlFor="searchjobs">Filter</Form.Label>
               <FilterInput
@@ -476,26 +504,6 @@ export default () => {
                   ))}
                 </Form.Select>
               </Form.Group>
-            )}
-            {groups !== null && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline-secondary"
-                  title="Expand all groups"
-                  onClick={() => setCollapsed(new Set())}
-                >
-                  <i className="fas fa-angles-down" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline-secondary"
-                  title="Collapse all groups"
-                  onClick={() => setCollapsed(new Set(groups.map((g) => g.key)))}
-                >
-                  <i className="fas fa-angles-up" />
-                </Button>
-              </>
             )}
           </div>
           {trimmedQuery && filterResult.error !== null ? (

@@ -420,9 +420,14 @@ class WebDriver:
 
     # --- Services
 
-    async def services(self, experiment_id: str) -> dict[str, str]:
+    async def services(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
         self.services_by_key.clear()
-        await self._request("services", experimentId=experiment_id)
+        payload = {"experimentId": experiment_id}
+        if run_id is not None:
+            payload["runId"] = run_id
+        await self._request("services", **payload)
         return {
             service["id"]: service["state"].lower()
             for service in self.services_by_key.values()
@@ -432,15 +437,21 @@ class WebDriver:
     async def active_services(self) -> dict[str, str]:
         raise NotImplementedError("the services strip is shown by the browser client")
 
-    async def start_service(self, experiment_id: str, service_id: str) -> Notification:
-        return await self._notification(
-            "service.start", experimentId=experiment_id, id=service_id
-        )
+    async def start_service(
+        self, experiment_id: str, service_id: str, run_id: str | None = None
+    ) -> Notification:
+        payload = {"experimentId": experiment_id, "id": service_id}
+        if run_id is not None:
+            payload["runId"] = run_id
+        return await self._notification("service.start", **payload)
 
-    async def stop_service(self, experiment_id: str, service_id: str) -> Notification:
-        return await self._notification(
-            "service.stop", experimentId=experiment_id, id=service_id
-        )
+    async def stop_service(
+        self, experiment_id: str, service_id: str, run_id: str | None = None
+    ) -> Notification:
+        payload = {"experimentId": experiment_id, "id": service_id}
+        if run_id is not None:
+            payload["runId"] = run_id
+        return await self._notification("service.stop", **payload)
 
     async def connection_state(self) -> str | None:
         # Receives what the server pushed
