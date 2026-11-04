@@ -177,8 +177,10 @@ class Scheduler(StateProvider, threading.Thread):
         self._job_event_readers: dict[Path, EventReader] = {}
         self._job_event_readers_lock = threading.Lock()
 
-        # Track which workspaces have logging setup
-        self._workspace_logging_setup: set[Path] = set()
+        # Log file handler of each workspace with running experiments, and
+        # the number of these experiments (the handler is removed when the
+        # last one exits, so that it does not outlive the workspace)
+        self._workspace_logging: dict[Path, tuple[logging.FileHandler, int]] = {}
         self._scheduler_log_file: Path | None = None
 
         # Last (scheduler_state, failure_reason) written to each experiment's
@@ -226,7 +228,7 @@ class Scheduler(StateProvider, threading.Thread):
         """
         return Scheduler.instance()
 
-    def setup_workspace_logging(self, workspace: "Workspace") -> None:
+    def setup_workspace_logging(self, workspace: "Workspace") -> logging.FileHandler:
         """Setup logging to workspace .scheduler/{run_id}/experimaestro.log"""
         log_file = workspace.scheduler_run_path / "experimaestro.log"
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -245,6 +247,20 @@ class Scheduler(StateProvider, threading.Thread):
         self._scheduler_log_file = log_file
 
         logger.info(f"Logging to {log_file}")
+        return file_handler
+
+    def release_workspace_logging(self, workspace_path: Path) -> None:
+        """Called when an experiment of the workspace exits: removes the log
+        file handler of the workspace once no experiment uses it"""
+        if (entry := self._workspace_logging.get(workspace_path)) is None:
+            return
+        handler, count = entry
+        if count > 1:
+            self._workspace_logging[workspace_path] = (handler, count - 1)
+            return
+        del self._workspace_logging[workspace_path]
+        logging.getLogger("xpm").removeHandler(handler)
+        handler.close()
 
     def get_scheduler_log_path(self) -> Path | None:
         """Return the experimaestro log file for the active workspace run."""
@@ -258,9 +274,12 @@ class Scheduler(StateProvider, threading.Thread):
 
         # Setup workspace logging on first experiment registration
         workspace_path = xp.workspace.path
-        if workspace_path not in self._workspace_logging_setup:
-            self.setup_workspace_logging(xp.workspace)
-            self._workspace_logging_setup.add(workspace_path)
+        if (entry := self._workspace_logging.get(workspace_path)) is not None:
+            handler, count = entry
+            self._workspace_logging[workspace_path] = (handler, count + 1)
+        else:
+            handler = self.setup_workspace_logging(xp.workspace)
+            self._workspace_logging[workspace_path] = (handler, 1)
 
             # Cleanup old run directories (runs at most once per day)
             try:
@@ -500,7 +519,19 @@ class Scheduler(StateProvider, threading.Thread):
             # Check if job needs to be re-started
             need_restart = False
             if other.scheduler_state.is_error():
-                need_restart = True
+                if (
+                    other.resumable
+                    and other.scheduler_state.failure_reason == JobFailureStatus.TIMEOUT
+                    and not other.reset_retries
+                    and other.retry_count >= other.max_retries
+                ):
+                    # Timed out with no retry left: stays failed (decided
+                    # here, from the scheduler state: once reset to WAITING,
+                    # aio_submit_inner could only tell from the state read
+                    # back from disk, which may not be there yet)
+                    self._retries_exhausted(other)
+                else:
+                    need_restart = True
             elif (
                 was_transient
                 and not other.transient.is_transient

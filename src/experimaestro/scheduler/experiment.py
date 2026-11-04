@@ -1188,6 +1188,10 @@ class experiment(BaseExperiment):
             # Put back old experiment as current one
             experiment.CURRENT = self.old_experiment
 
+            # Stop logging to the workspace log file (if no other experiment
+            # of the workspace runs)
+            self.scheduler.release_workspace_logging(self.workspace.path)
+
         if self.workspace.run_mode == RunMode.NORMAL:
             # Remove job directories for transient jobs with REMOVE mode
             if exc_type is None:
