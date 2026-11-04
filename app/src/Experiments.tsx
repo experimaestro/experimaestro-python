@@ -358,7 +358,6 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
       <div className="d-flex align-items-center flex-wrap gap-2 mb-1">
         {groups !== null && (
           <Button
-            size="sm"
             variant="outline-secondary"
             title={allCollapsed ? "Expand all groups" : "Collapse all groups"}
             aria-label={allCollapsed ? "Expand all groups" : "Collapse all groups"}

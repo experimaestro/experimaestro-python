@@ -389,13 +389,11 @@ export default () => {
           >
             {groups !== null && (
               <Button
-                size="sm"
                 variant="outline-secondary"
                 title={allCollapsed ? "Expand all groups" : "Collapse all groups"}
                 aria-label={allCollapsed ? "Expand all groups" : "Collapse all groups"}
                 onClick={toggleAllGroups}
                 style={{
-                  height: "31px",
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
