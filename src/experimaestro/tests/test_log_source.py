@@ -10,9 +10,11 @@ import pytest
 
 from experimaestro.logs.reader import LogFile
 from experimaestro.logs.source import (
+    REMOTE_LINE_SEARCH,
     LocalLogSource,
     ProbeDelay,
     RemoteLogSource,
+    ServerLogSource,
 )
 from experimaestro.scheduler.remote.cache_dir import (
     MARKER,
@@ -41,7 +43,8 @@ class Remote:
                 "unless_size": unless_size,
             }
         )
-        if length:
+        if answer.get("data"):
+            # Fetched blocks (not the probes of an unchanged file)
             self.requests.append((offset, length))
         self.sent += len(answer.get("data", ""))
         return answer
@@ -188,3 +191,105 @@ def test_read_file_absolute_path(tmp_path):
             path = str(tmp_path / other / "job" / "task.err")
             answer = remote.read_file(path, 0, 100, 0, None)
             assert base64.b64decode(answer["data"]) == b"hello\n"
+
+
+class Renderer:
+    """Renders the logs of a workspace as the remote server does, counting the
+    bytes sent"""
+
+    def __init__(self, workspace):
+        self.server = SSHStateProviderServer(workspace)
+        self.requests = 0
+        self.sent = 0
+
+    def read_log(self, path, offset, before, generation):
+        answer = self.server._handle_read_log(
+            {"path": path, "offset": offset, "before": before, "generation": generation}
+        )
+        self.requests += 1
+        self.sent += len(json.dumps(answer))
+        return answer
+
+
+def progress_log(updates: int) -> tuple[list[str], str, str]:
+    """Lines, then a progress bar rewritten ``updates`` times (no new line);
+    returns the lines, the last state of the bar and the log"""
+    lines = [f"INFO line {i:05d} {'x' * 50}" for i in range(5_000)]
+
+    def bar(i: int) -> str:
+        filled = 10 * i // updates
+        return f"Indexing: {i:7d}|{'█' * filled}{' ' * (10 - filled)}| docs/s"
+
+    text = "".join(f"{line}\n" for line in lines)
+    text += "".join(f"\r{bar(i)}" for i in range(updates))
+    return lines, bar(updates - 1), text
+
+
+def read_whole(reader: LogFile) -> tuple[list[str], str]:
+    lines, partial = reader.read_tail()
+    while earlier := reader.read_before():
+        lines = earlier + lines
+    return lines, partial
+
+
+def test_server_rendered_log(tmp_path):
+    """A log rendered by the remote server: the lines before a long progress
+    bar, and the bar as last drawn, without sending the bar's rewrites"""
+    (tmp_path / "job").mkdir()
+    lines, bar, text = progress_log(100_000)
+    (tmp_path / "job" / "task.err").write_text(text)
+    renderer = Renderer(tmp_path)
+    reader = LogFile(ServerLogSource(renderer, "job/task.err"))
+
+    shown, partial = reader.read_tail()
+    assert partial == bar
+    assert shown and shown == lines[-len(shown) :]
+    assert renderer.sent < 2 * 128 * 1024 < len(text.encode()) // 10
+    while earlier := reader.read_before():
+        shown = earlier + shown
+    assert shown == lines
+
+    # Following: the new content only
+    with open(tmp_path / "job" / "task.err", "a") as f:
+        f.write("\ndone\n")
+    assert reader.read_new_content() == ([bar, "done"], "")
+
+
+def test_server_rendered_log_not_asked_while_probe_not_due(tmp_path, monkeypatch):
+    (tmp_path / "job").mkdir()
+    (tmp_path / "job" / "task.err").write_text("a\n")
+    renderer = Renderer(tmp_path)
+    reader = LogFile(ServerLogSource(renderer, "job/task.err"))
+    assert reader.read_tail() == (["a"], "")
+    monkeypatch.setattr(ProbeDelay, "due", lambda self: False)
+    requests = renderer.requests
+    assert reader.read_new_content() == ([], "")
+    assert renderer.requests == requests
+
+
+def test_remote_log_progress_bar_by_blocks(remote, tmp_path):
+    """Older servers (logs read by blocks): the lines before a progress bar
+    are found while it is not too long"""
+    lines, bar, text = progress_log(20_000)
+    assert len(text.encode()) - 5_000 * 67 < REMOTE_LINE_SEARCH
+    write(remote, text)
+    assert read_whole(LogFile(source(remote, tmp_path))) == (lines, bar)
+
+
+def test_remote_log_never_returns_unfetched_bytes(remote, tmp_path):
+    """The server may report a size beyond the data it sends (NFS): the part
+    not fetched is not read (as zeros)"""
+    write(remote, "abc\n")
+    log = source(remote, tmp_path)
+    read_file = remote.read_file
+
+    def short_read(*args):
+        answer = read_file(*args)
+        if answer["exists"]:
+            answer["size"] += 100
+        return answer
+
+    remote.read_file = short_read
+    size = log.size()
+    assert size == 104
+    assert log.read(0, size) == b"abc\n"

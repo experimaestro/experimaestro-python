@@ -14,6 +14,7 @@ import os
 import sys
 import threading
 import time
+from collections import OrderedDict
 from importlib.metadata import version as get_package_version
 from pathlib import Path, PurePosixPath
 from typing import IO
@@ -22,6 +23,8 @@ from collections.abc import Callable
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
 from dataclasses import asdict
 
+from experimaestro.logs.reader import read_log_slice
+from experimaestro.logs.source import LocalLogSource
 from experimaestro.scheduler.event_filter import EventFilter
 from experimaestro.scheduler.state_status import EventBase
 from experimaestro.scheduler.remote.protocol import (
@@ -85,6 +88,10 @@ class SSHStateProviderServer:
         #: Events the client watches (all of them until it says otherwise);
         #: the client keeps the job counts of all the experiments up to date
         self._event_filter = EventFilter(job_counts=True)
+        #: Sources of the logs read (see read_log), the last read last: they
+        #: tell when a file was replaced (their generation)
+        self._log_sources: OrderedDict[Path, LocalLogSource] = OrderedDict()
+        self._log_sources_lock = threading.Lock()
 
         # Map of method names to handler functions
         self._handlers: dict[str, Callable] = {
@@ -110,6 +117,7 @@ class SSHStateProviderServer:
             RPCMethod.GET_STRAY_JOBS.value: self._handle_get_stray_jobs,
             RPCMethod.WATCH.value: self._handle_watch,
             RPCMethod.READ_FILE.value: self._handle_read_file,
+            RPCMethod.READ_LOG.value: self._handle_read_log,
             RPCMethod.GET_FAILURE_DETAILS.value: self._handle_get_failure_details,
         }
 
@@ -673,23 +681,11 @@ class SSHStateProviderServer:
         the client tells a file rewritten in place (job restarted) by its
         start.
         """
-        relative = PurePosixPath(params["path"])
-        if relative.is_absolute():
-            # A path given as reported by the server (e.g. through a
-            # symbolic link to the workspace)
-            try:
-                relative = PurePosixPath(
-                    Path(relative).resolve().relative_to(self.workspace_path.resolve())
-                )
-            except ValueError:
-                raise PermissionError(f"{relative} is not a path in the workspace")
-        if ".." in relative.parts:
-            raise PermissionError(f"{relative} is not a path in the workspace")
         offset = int(params.get("offset", 0))
         length = min(int(params.get("length", 0)), READ_FILE_MAX_SIZE)
         fingerprint_length = int(params.get("fingerprint_length", 0))
         try:
-            f = open(self.workspace_path / relative, "rb")
+            f = open(self._workspace_file(params["path"]), "rb")
         except FileNotFoundError:
             return {"exists": False}
 
@@ -714,3 +710,46 @@ class SSHStateProviderServer:
             "head": hashlib.sha256(head).hexdigest(),
             "head_length": len(head),
         }
+
+    #: Log sources kept by the server (see read_log)
+    MAX_LOG_SOURCES = 256
+
+    def _handle_read_log(self, params: dict) -> dict:
+        """Render a slice of a log of the workspace
+
+        Params: ``path`` (as for ``read_file``), and ``offset``, ``before``
+        and ``generation`` as for
+        :func:`~experimaestro.logs.reader.read_log_slice`, whose answer is
+        returned: only the lines shown are sent, not the bytes of the progress
+        bars that rewrite them.
+        """
+        path = self._workspace_file(params["path"])
+        with self._log_sources_lock:
+            if (source := self._log_sources.pop(path, None)) is None:
+                source = LocalLogSource(path)
+            self._log_sources[path] = source
+            while len(self._log_sources) > self.MAX_LOG_SOURCES:
+                self._log_sources.popitem(last=False)
+        return read_log_slice(
+            source,
+            params.get("offset"),
+            before=params.get("before"),
+            generation=params.get("generation"),
+        )
+
+    def _workspace_file(self, path: str) -> Path:
+        """A file of the workspace, given relative to it (or absolute within
+        it)"""
+        relative = PurePosixPath(path)
+        if relative.is_absolute():
+            # A path given as reported by the server (e.g. through a
+            # symbolic link to the workspace)
+            try:
+                relative = PurePosixPath(
+                    Path(relative).resolve().relative_to(self.workspace_path.resolve())
+                )
+            except ValueError:
+                raise PermissionError(f"{relative} is not a path in the workspace")
+        if ".." in relative.parts:
+            raise PermissionError(f"{relative} is not a path in the workspace")
+        return self.workspace_path / relative
