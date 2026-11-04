@@ -68,6 +68,18 @@ def failure_description(state: JobState | None) -> str | None:
     return FAILURE_DESCRIPTIONS.get(reason.name, reason.name.lower())
 
 
+def has_started(state: JobState | None) -> bool:
+    """Whether a job in this state has started (and may have written logs)
+
+    Jobs that are not submitted yet, wait for their dependencies or are queued
+    by the launcher (scheduled) have not; their log files, if any, are those of
+    an earlier run.
+    """
+    if state is None:
+        return False
+    return not (state.notstarted() or state == JobState.SCHEDULED)
+
+
 def status_rank(state: JobState | None) -> int:
     """Sort rank of a job state (lower comes first)
 

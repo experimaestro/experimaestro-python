@@ -534,8 +534,8 @@ appends do not update.
   under the job lock, given I1).
 - No reader in `scheduler/` or `cli/` uses `read_json`; NFS `ESTALE` is not
   retried.
-- The SSH server's `read_file` rejects `..` and absolute paths but follows
-  relative symlinks inside the workspace.
+- The SSH server's `read_file` and `read_log` reject `..` and absolute paths
+  outside the workspace but follow relative symlinks inside the workspace.
 - `WorkspaceStateProvider` has dead consolidation methods
   (`_consolidate_experiment_events`, `_consolidate_job_events`,
   `_write_experiment_status`, `_archive_event_files`, `_cleanup_event_files`).

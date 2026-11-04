@@ -25,11 +25,24 @@ class ExperimentDeselected(Message):
 class JobSelected(Message):
     """Message sent when a job is selected"""
 
-    def __init__(self, job_id: str, task_id: str, experiment_id: str) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        task_id: str,
+        experiment_id: str,
+        *,
+        from_job: bool = False,
+    ) -> None:
+        """
+        Args:
+            from_job: The job is opened from the displayed job details (e.g. a
+                dependency): going back shows these details again
+        """
         super().__init__()
         self.job_id = job_id
         self.task_id = task_id
         self.experiment_id = experiment_id
+        self.from_job = from_job
 
 
 class JobDeselected(Message):

@@ -52,6 +52,7 @@ from experimaestro.logs.source import (
     LogSource,
     RemoteLogSource,
     RsyncLogSource,
+    ServerLogSource,
 )
 from experimaestro.scheduler.remote.cache_dir import create_cache_dir
 from experimaestro.scheduler.remote.reconnect import ReconnectPolicy
@@ -2101,10 +2102,29 @@ class SSHStateProviderClient(OfflineStateProvider):
             },
         )
 
+    def read_log(
+        self,
+        path: str,
+        offset: int | None,
+        before: int | None,
+        generation: int | None,
+    ) -> dict:
+        """Render a slice of a log of the remote workspace (see the server's
+        ``read_log``)"""
+        return self._call_sync(
+            RPCMethod.READ_LOG,
+            {
+                "path": path,
+                "offset": offset,
+                "before": before,
+                "generation": generation,
+            },
+        )
+
     def log_source(self, path: Path) -> LogSource:
         """Source of a log file of the remote workspace (given by its path in
-        the local cache, or remote): read by blocks, or copied with rsync by
-        older remote servers"""
+        the local cache, or remote): rendered by the remote server, or, by
+        older remote servers, read by blocks or copied with rsync"""
         if self.local_cache_dir is None:
             return LocalLogSource(path)
         if path.is_relative_to(self.local_cache_dir):
@@ -2115,7 +2135,9 @@ class SSHStateProviderClient(OfflineStateProvider):
             remote_path = path.as_posix()
         with self._log_sources_lock:
             if (source := self._log_sources.get(path)) is None:
-                if self.supports(RPCMethod.READ_FILE):
+                if self.supports(RPCMethod.READ_LOG):
+                    source = ServerLogSource(self, remote_path)
+                elif self.supports(RPCMethod.READ_FILE):
                     source = RemoteLogSource(
                         self,
                         remote_path,

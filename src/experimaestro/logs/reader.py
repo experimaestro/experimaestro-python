@@ -9,16 +9,21 @@ Logs are rendered as a terminal would show them (:func:`render_terminal`):
 go back to previous lines, and the other escape sequences (colors) are
 dropped.
 
-Logs are read from a :class:`~experimaestro.logs.source.LogSource`
-(local file, or remote file read by blocks): their end first, then the new
+Logs are read by slices (:func:`read_log_slice`) from a
+:class:`~experimaestro.logs.source.LogSource`: their end first, then the new
 content (following) or the earlier one (scrolling up), by pages of
-:data:`PAGE_SIZE` bytes.
+:data:`PAGE_SIZE` bytes. The slices are rendered from the bytes of the file
+(:func:`render_log_slice`), by the remote server for SSH workspaces.
+
+A progress bar rewritten for hours with ``\\r`` makes a single line of many
+megabytes: the end of the log then starts within it, and the lines before
+are read from the start of that line (the bar is shown as last drawn).
 """
 
 import re
 from pathlib import Path
 
-from experimaestro.logs.source import LocalLogSource, LogSource
+from experimaestro.logs.source import ByteLogSource, LocalLogSource, LogSource
 
 #: Bytes read when opening a log (its end), and when loading earlier content
 PAGE_SIZE = 128 * 1024
@@ -196,15 +201,37 @@ def _align(data: bytes, start: int) -> tuple[bytes, int]:
     return data, start
 
 
-def _tail(source: LogSource, size: int, max_bytes: int) -> tuple[bytes, int]:
+def _tail(source: ByteLogSource, size: int, max_bytes: int) -> tuple[bytes, int]:
     """The end of a log (from a line start), and where it starts"""
     start = max(0, size - max_bytes)
     return _align(source.read(start, size - start), start)
 
 
-def _lines_before(source: LogSource, end: int) -> tuple[list[str], int]:
+def _read_end(
+    source: ByteLogSource, size: int, max_bytes: int
+) -> tuple[list[str], _Screen, int, int]:
+    """Read the end of a log
+
+    Returns ``(before, screen, data_start, start)``: the end of the log
+    rendered (``screen``, from ``data_start``) and, when it is within a single
+    long line (a progress bar rewritten with ``\\r``), the lines before that
+    line (``before``, from ``start``); the rewrites of the bar in between are
+    not read.
+    """
+    data, data_start = _tail(source, size, max_bytes)
+    start, before = data_start, []
+    if data_start > 0 and b"\n" not in data:
+        line_start = source.line_start(data_start)
+        if line_start is not None:
+            before, start = _lines_before(source, line_start)
+    return before, _render_screen(data), data_start, start
+
+
+def _lines_before(source: ByteLogSource, end: int) -> tuple[list[str], int]:
     """The lines of the page ending at ``end`` (a line start), and where they
     start"""
+    if end == 0:
+        return [], 0
     start = max(0, end - PAGE_SIZE)
     data, start = _align(source.read(start, end - start), start)
     completed, pending, _ = render_terminal(data)
@@ -216,7 +243,7 @@ def _lines_before(source: LogSource, end: int) -> tuple[list[str], int]:
 
 
 class LogFile:
-    """Reads a log, keeping track of what it read (used by the TUI)
+    """Reads a log by slices, keeping track of what it read (used by the TUI)
 
     The end of the log is read first (:meth:`read_tail`), then its new content
     (:meth:`read_new_content`) or its earlier one (:meth:`read_before`). When
@@ -228,13 +255,13 @@ class LogFile:
 
     def __init__(self, source: LogSource | Path | str):
         self.source = _source(source)
-        #: The generation of the source of what was read
-        self.generation = self.source.generation
+        #: The generation of the file read (see read_log_slice)
+        self.generation: int | None = None
         #: Where the next read starts (the lines still being written)
         self.position = 0
         #: Where what was read starts (earlier content is before)
         self.start = 0
-        self._size: int | None = None
+        self._exists = False
         self._partial = ""
         #: Incremented each time the end of the log is read again: what was
         #: shown is to be replaced
@@ -243,15 +270,22 @@ class LogFile:
     @property
     def exists(self) -> bool:
         """Whether the log file existed when last read"""
-        return self._size is not None
+        return self._exists
 
-    def _render(self, screen: _Screen) -> tuple[list[str], str]:
-        completed, pending, offset = _pending(screen)
-        self.position += offset
-        self._partial = "\n".join(pending)
-        return completed, self._partial
+    def _apply(self, answer: dict) -> tuple[list[str], str]:
+        if answer["tail"]:
+            # What is shown is replaced (unless nothing is shown nor read,
+            # e.g. while the file does not exist)
+            if self.position or self._partial or answer["content"] or answer["partial"]:
+                self.tails += 1
+            self.start = answer["start"]
+        self._exists = answer["exists"]
+        self.generation = answer["generation"]
+        self.position = answer["offset"]
+        self._partial = answer["partial"]
+        return _lines(answer["content"]), self._partial
 
-    def read_tail(self, max_bytes: int = PAGE_SIZE) -> tuple[list[str], str]:
+    def read_tail(self) -> tuple[list[str], str]:
         """Read the end of the log
 
         Returns ``(complete_lines, partial)``. ``partial`` holds the lines
@@ -259,16 +293,11 @@ class LogFile:
         bars), joined with ``\\n``, and may be empty.
         """
         self.source.touch()
+        # The display is replaced, even when the log is empty
         self.tails += 1
-        size = self._size = self.source.size()
-        self.generation = self.source.generation
-        self._partial = ""
-        self.position = self.start = 0
-        if not size:
-            return [], ""
-        data, self.start = _tail(self.source, size, max_bytes)
-        self.position = self.start
-        return self._render(_render_screen(data))
+        answer = self.source.read_slice()
+        self.start = answer["start"]
+        return self._apply({**answer, "tail": False})
 
     def read_new_content(self) -> tuple[list[str], str]:
         """Read the new content of the log
@@ -280,29 +309,23 @@ class LogFile:
         much new content, or when it rewrites lines already returned as
         completed (see :attr:`tails`).
         """
-        size = self.source.size()
-        if (
-            self.source.generation != self.generation
-            or (size or 0) - self.position > MAX_FORWARD_SIZE
-        ):
-            return self.read_tail()
-        if size == self._size or size is None:
-            self._size = size
-            return [], self._partial
-        screen = _render_screen(self.source.read(self.position, size - self.position))
-        if screen.clamped:
-            # Goes back to lines already shown as completed: read again
-            return self.read_tail()
-        self._size = size
-        return self._render(screen)
+        return self._apply(
+            self.source.read_slice(self.position, generation=self.generation)
+        )
 
     def read_before(self) -> list[str]:
         """Read the lines before what was read (empty at the start)"""
         if self.start == 0:
             return []
         self.source.touch()
-        lines, self.start = _lines_before(self.source, self.start)
-        return lines
+        answer = self.source.read_slice(before=self.start, generation=self.generation)
+        self.start = answer["start"]
+        return _lines(answer["content"])
+
+
+def _lines(content: str) -> list[str]:
+    """The lines of the content of a slice (each ending with a new line)"""
+    return content.split("\n")[:-1]
 
 
 def empty_log_slice(size: int = 0, generation: int = 0, exists: bool = False) -> dict:
@@ -325,9 +348,21 @@ def read_log_slice(
     *,
     before: int | None = None,
     generation: int | None = None,
+) -> dict:
+    """Stateless log read suitable for HTTP polling (see
+    :func:`render_log_slice`)"""
+    return _source(source).read_slice(offset, before=before, generation=generation)
+
+
+def render_log_slice(
+    source: ByteLogSource | Path | str,
+    offset: int | None = None,
+    *,
+    before: int | None = None,
+    generation: int | None = None,
     tail_bytes: int = PAGE_SIZE,
 ) -> dict:
-    """Stateless log read suitable for HTTP polling.
+    """Render a slice of a log from its bytes
 
     Args:
         source: the log
@@ -348,7 +383,9 @@ def read_log_slice(
       clients append it to what they show (or prepend it when reading
       ``before``), or replace what they show with it when ``tail`` is true
       (the end of the log was read: first read, file replaced, too much new
-      content, or lines already sent as completed rewritten);
+      content, or lines already sent as completed rewritten); when the end
+      of the log is within a long progress bar line, the content starts with
+      the lines before that line;
     - ``partial`` holds the lines still being written (the last one, or the
       ones progress bars go back to), joined with ``\\n``: clients show it
       after the content and *replace* it on each poll;
@@ -359,6 +396,7 @@ def read_log_slice(
     - ``exists`` tells whether the log file exists.
     """
     source = _source(source)
+    assert isinstance(source, ByteLogSource)
     if offset is None or offset < 0:
         source.touch()
     size = source.size()
@@ -386,21 +424,20 @@ def read_log_slice(
         or stale
         or size - offset > MAX_FORWARD_SIZE
     )
-    screen = None
+    screen, before_lines = None, []
     if not tail:
-        start = offset
+        start = data_start = offset
         screen = _render_screen(source.read(offset, size - offset))
         # Goes back to lines already sent as completed: read the end again
         tail = screen.clamped
     if tail:
-        data, start = _tail(source, size, tail_bytes)
-        screen = _render_screen(data)
+        before_lines, screen, data_start, start = _read_end(source, size, tail_bytes)
     completed, pending, pending_offset = _pending(screen)
     return {
         **result,
-        "content": "".join(f"{line}\n" for line in completed),
+        "content": "".join(f"{line}\n" for line in before_lines + completed),
         "partial": "\n".join(pending),
-        "offset": start + pending_offset,
+        "offset": data_start + pending_offset,
         "start": start,
         "tail": tail,
     }

@@ -278,6 +278,23 @@ async def test_job_detail_follow_dependency(ui):
     assert (detail.state, detail.failure) == ("error", "FAILED")
 
 
+@pytest.mark.ui("tui", "browser")
+async def test_job_detail_back_from_dependency(ui):
+    """Going back from the detail of a followed dependency shows the job it
+    was followed from, then closes the detail view"""
+    await ui.open_experiment("baseline", "20260101_100000")
+    detail = await ui.back_from_dependency(EVAL_DEP_FAILED, LEARN_FAILED)
+    assert detail is not None and detail.job_id == EVAL_DEP_FAILED
+
+
+async def test_no_logs_before_start(ui):
+    """A job that has not started has no logs to show, even if log files of an
+    earlier run are there"""
+    await ui.open_experiment("sweep")
+    assert not await ui.logs_offered(EVAL_WAITING)
+    assert await ui.logs_offered(LEARN_RUNNING)
+
+
 async def test_job_logs(ui):
     await ui.open_experiment("baseline")
     assert await ui.job_log(LEARN_ERROR, "stdout") == stdout_text(LEARN_ERROR)

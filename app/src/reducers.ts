@@ -77,6 +77,8 @@ export type Job = {
   status: JobStatus;
   // Sort rank of the status, lower first (scheduler/job_status.py)
   statusRank: number;
+  // Whether the job has started: otherwise, it has no logs to show
+  started?: boolean;
   schedulerState?: string | null;
 
   start: string;

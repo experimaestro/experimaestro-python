@@ -298,6 +298,15 @@ class WebDriver:
         assert dependency_id in self.jobs
         return await self.job_detail(dependency_id)
 
+    async def back_from_dependency(
+        self, job_id: str, dependency_id: str
+    ) -> JobDetail | None:
+        raise NotImplementedError("navigation is done by the browser")
+
+    async def logs_offered(self, job_id: str) -> bool:
+        await self.job_detail(job_id)
+        return self.jobs[job_id]["started"]
+
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
         response = self.client.get(
             f"/api/jobs/{self._task_id(job_id)}/{job_id}/logs/{stream}"

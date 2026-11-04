@@ -68,7 +68,9 @@ export default ({
         </td>
         <td rowSpan={2} className="job-actions text-nowrap">
           <i className="fas fa-eye action" title="Details" onClick={onShow} />
-          <i className="fas fa-file-lines action" title="Logs" onClick={onLogs} />
+          {job.started !== false && (
+            <i className="fas fa-file-lines action" title="Logs" onClick={onLogs} />
+          )}
           {job.status === "running" && (
             <i className="fa fa-skull-crossbones action" title="Kill" onClick={onKill} />
           )}

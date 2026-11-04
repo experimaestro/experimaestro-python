@@ -262,3 +262,30 @@ def test_read_log_slice_rereads_tail_when_completed_lines_rewritten(tmp_path):
     poll = read_log_slice(log, offset)
     assert poll["tail"]
     assert (poll["content"], poll["partial"]) == ("start\n", "outer: 2\ninner")
+
+
+def test_long_progress_bar_shows_the_lines_before(tmp_path):
+    """The end of the log is within a progress bar rewritten for hours (no new
+    line): the lines before it are shown, then the bar as last drawn"""
+    log = tmp_path / "task.err"
+    lines = [f"INFO line {i}" for i in range(20)]
+    with log.open("w", encoding="utf-8") as f:
+        f.writelines(f"{line}\n" for line in lines)
+        for i in range(5_000):
+            f.write(f"\rBuilding the index: {i:5d}|{'█' * (i // 500)}| docs/s")
+    bar = f"Building the index:  4999|{'█' * 9}| docs/s"
+
+    answer = read_log_slice(log)
+    assert answer["content"] == "".join(f"{line}\n" for line in lines)
+    assert answer["partial"] == bar
+    assert answer["start"] == 0
+
+    reader = LogFile(log)
+    assert reader.read_tail() == (lines, bar)
+    assert reader.read_before() == []
+    # Following from within the bar
+    with log.open("a", encoding="utf-8") as f:
+        f.write("\rBuilding the index: done\n")
+    new, partial = reader.read_new_content()
+    # (the line of a bar stays pending: nested bars may go back to it)
+    assert "\n".join([*new, partial]).strip() == "Building the index: done"

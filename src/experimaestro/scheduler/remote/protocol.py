@@ -105,6 +105,7 @@ class RPCMethod(str, Enum):
     GET_STRAY_JOBS = "get_stray_jobs"
     WATCH = "watch"
     READ_FILE = "read_file"
+    READ_LOG = "read_log"
     GET_FAILURE_DETAILS = "get_failure_details"
 
 

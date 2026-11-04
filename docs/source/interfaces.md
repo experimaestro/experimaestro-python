@@ -81,7 +81,8 @@ Then open `http://localhost:12345` in your browser.
   folder); a notification at the top right tells what was copied
 - **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser (stderr
-  first). The end of a log is shown first and followed as it grows; earlier
+  first), once the job has started (the logs of a waiting or scheduled job
+  are those of an earlier run, and are not shown). The end of a log is shown first and followed as it grows; earlier
   lines are loaded when scrolling to the top. Progress bars (tqdm, nested ones
   included) are shown as in a terminal, on one line
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
@@ -164,7 +165,7 @@ experimaestro --workdir /path/to/workspace monitor --console
 - **Tree View**: Jobs grouped by status, task and/or tag (`t`)
 - **Job Details**: Process, carbon, tags, progress, the failure reason with
   what happened (see below) and the job dependencies with their status and failure reason (click a dependency to
-  open its details)
+  open its details, `Esc` to come back to the job it was opened from)
 - **Live Logs**: Real-time log output panel
 - **Keyboard Navigation**: Navigate and interact using keyboard shortcuts
 - **Status Bar**: Shows experiment status and connection info
@@ -204,7 +205,7 @@ Pressing the key of the current sort again reverses the order.
 
 | Key | Action |
 |-----|--------|
-| `l` | View job logs |
+| `l` | View job logs (once the job has started) |
 | `Ctrl+d` | Delete job |
 | `Ctrl+k` | Kill running job |
 | `/` | Open search filter |
@@ -383,13 +384,16 @@ The SSH options (`--remote-xpm`, `-o`, …) are given before the command, see
 2. **Server Start**: On the remote host, experimaestro starts in server mode,
    reading commands from stdin and writing responses to stdout
 3. **JSON-RPC Protocol**: Commands and responses are exchanged using JSON-RPC 2.0
-4. **Job logs**: The logs are read by blocks through the same connection (the
-   end of a log first, earlier blocks when scrolling up, the new content while
-   following), into a local copy that lasts as long as the monitor. The size of
-   an open log is checked every second, less and less often (up to every 30 s)
-   while it does not change. A log rewritten by a restarted job is detected and
-   read again. With a remote experimaestro too old to send blocks, logs are
-   copied with rsync.
+4. **Job logs**: The remote experimaestro renders the logs as a terminal would
+   and sends them through the same connection, by pages (the end of a log
+   first, earlier pages when scrolling up, the new content while following):
+   only the lines shown are sent, not the bytes of the progress bars that
+   rewrite them. When the end of a log is a progress bar running for hours,
+   the lines before it are shown with the bar as last drawn. An open log is
+   checked every second, less and less often (up to every 30 s) while it does
+   not change. A log rewritten by a restarted job is detected and read again.
+   With an older remote experimaestro, logs are read by blocks into a local
+   copy that lasts as long as the monitor, or, older still, copied with rsync.
 5. **File Sync**: When needed (e.g., for TensorBoard logs), files are synchronized
    on-demand using rsync over SSH
 6. **Real-time Updates**: The server sends notifications when job states change

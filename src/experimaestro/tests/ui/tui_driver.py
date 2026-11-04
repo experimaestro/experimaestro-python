@@ -365,6 +365,34 @@ class TuiDriver:
         await self.settle()
         return self._read_job_detail(dependency_id)
 
+    async def back_from_dependency(
+        self, job_id: str, dependency_id: str
+    ) -> JobDetail | None:
+        await self.follow_dependency(job_id, dependency_id)
+        await self.pilot.press("escape")
+        await self.settle()
+        if self.app.query_one("#job-detail-container").has_class("hidden"):
+            return None
+        view = self.app.query_one(JobDetailView)
+        return self._read_job_detail(view.current_job_id)
+
+    async def logs_offered(self, job_id: str) -> bool:
+        # From the job list
+        await self._show_jobs()
+        await self._select_row(self._table("#jobs-table"), job_id)
+        await self.pilot.press("l")
+        await self.settle()
+        from_list = isinstance(self.app.screen, LogViewerScreen)
+        # From the detail view (its hint, then its key)
+        await self.job_detail(job_id)
+        hint = str(self.app.query_one("#job-logs-hint", Static).render())
+        await self.pilot.press("l")
+        await self.settle()
+        from_detail = isinstance(self.app.screen, LogViewerScreen)
+        assert ("view logs" in hint) == from_detail
+        assert from_list == from_detail
+        return from_detail
+
     def _read_job_detail(self, job_id: str) -> JobDetail:
         view = self.app.query_one(JobDetailView)
         job = view.job_data

@@ -21,6 +21,7 @@ from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import (
     display_state,
     failure_description,
+    has_started,
     retries_summary,
     status_rank,
 )
@@ -185,6 +186,8 @@ def serialize_job(
     if provider is not None:
         payload["locator"] = provider.get_display_path(job)
     payload["statusRank"] = status_rank(state)
+    # Jobs that have not started have no logs (see has_started)
+    payload["started"] = has_started(state)
     # Failure reason as shown by the TUI (icon) with its description
     payload["failureIcon"] = state.icon if state.failure_reason else None
     payload["failureDescription"] = failure_description(state)

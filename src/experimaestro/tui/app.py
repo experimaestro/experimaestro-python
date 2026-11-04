@@ -15,6 +15,7 @@ from textual.widgets import (
 from textual.binding import Binding
 
 from experimaestro.scheduler import job_operations
+from experimaestro.scheduler.job_status import has_started
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.state_status import (
     EventBase,
@@ -676,6 +677,7 @@ class ExperimaestroUI(App):
             message.task_id,
             message.experiment_id,
             self.query_one(JobsTable).current_run_id,
+            keep_history=message.from_job,
         )
 
     def on_job_deselected(self, message: JobDeselected) -> None:
@@ -714,7 +716,9 @@ class ExperimaestroUI(App):
         # Check if job detail is visible -> go back to jobs/services tabs
         job_detail_container = self.query_one("#job-detail-container")
         if not job_detail_container.has_class("hidden"):
-            self.post_message(JobDeselected())
+            # Back to the job shown before (a followed dependency), if any
+            if not self.query_one(JobDetailView).go_back():
+                self.post_message(JobDeselected())
             return
 
         # Check if experiment tabs visible -> go back to experiments list
@@ -770,12 +774,10 @@ class ExperimaestroUI(App):
         The logs are read from the state provider's log sources: for remote
         monitoring, they are fetched while the viewer shows that they load.
         """
-        from experimaestro.scheduler.interfaces import JobState
-
-        # Check if job is scheduled (not yet running) - no logs available
-        if message.job_state == JobState.SCHEDULED:
+        # A job that has not started has no logs (only those of a former run)
+        if not has_started(message.job_state):
             self.notify(
-                "Job is scheduled but not yet running - logs not available",
+                "The job has not started yet: no logs to show",
                 severity="information",
             )
             return

@@ -30,7 +30,11 @@ from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.remote.client import SSHStateProviderClient
 from experimaestro.scheduler.remote.protocol import RemoteMethodNotSupported, RPCMethod
 from experimaestro.logs.reader import LogFile
-from experimaestro.logs.source import RemoteLogSource, RsyncLogSource
+from experimaestro.logs.source import (
+    RemoteLogSource,
+    RsyncLogSource,
+    ServerLogSource,
+)
 from experimaestro.tests.utils import TemporaryExperiment, wait_for
 
 from .conftest import DRIVERS, INTERFACES, _browser_driver
@@ -229,8 +233,27 @@ async def test_job_log_earlier_lines(ui, remote_workspace):
     assert lines == remote_workspace.long_log
 
 
+def test_job_log_rendered_by_server(ssh_provider, remote_workspace):
+    """The remote server renders the logs: only the end of a log is sent when
+    opening it"""
+    job = ssh_provider.get_job(
+        f"{Greet.__module__}.greet", remote_workspace.jobs["alice"]
+    )
+    source = ssh_provider.log_source(job.path / "greet.out")
+    assert isinstance(source, ServerLogSource)
+    reader = LogFile(source)
+    lines, _ = reader.read_tail()
+    assert lines == remote_workspace.long_log[-len(lines) :]
+    assert 0 < len(lines) < len(remote_workspace.long_log)
+    while earlier := reader.read_before():
+        lines = earlier + lines
+    assert lines == remote_workspace.long_log
+
+
 def test_job_log_read_by_blocks(ssh_provider, remote_workspace):
-    """Only the end of a log is fetched when opening it"""
+    """Remote servers that do not render logs: they are read by blocks, only
+    the end of a log being fetched when opening it"""
+    ssh_provider._server_methods = ssh_provider._server_methods - {RPCMethod.READ_LOG}
     job = ssh_provider.get_job(
         f"{Greet.__module__}.greet", remote_workspace.jobs["alice"]
     )
