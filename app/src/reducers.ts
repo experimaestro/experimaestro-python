@@ -1,4 +1,4 @@
-import { combineReducers, createSlice, PayloadAction } from "@reduxjs/toolkit";
+import { combineReducers, createSlice, Draft, PayloadAction } from "@reduxjs/toolkit";
 import { messageSlice } from "./ui/messages";
 import _ from "lodash";
 import { Route, currentLocationRoute, isScoped, route } from "./routes";
@@ -237,6 +237,29 @@ export type State = {
 const initialRoute = currentLocationRoute();
 const initialScope = isScoped(initialRoute.view) ? initialRoute : route("experiments");
 
+/**
+ * Drops the jobs when the current run of the shown experiment changes (a
+ * relaunch) while the current run is shown: they are requested again for the
+ * new run (App.tsx)
+ */
+function dropJobsOnRunChange(
+  draft: Draft<State>,
+  experimentId: string,
+  prevRunId: string | null | undefined,
+  runId: string | null | undefined,
+) {
+  if (
+    draft.currentExperiment === experimentId &&
+    draft.currentRun === null &&
+    runId &&
+    prevRunId &&
+    prevRunId !== runId
+  ) {
+    draft.jobs = { byId: {}, ids: [] };
+    draft.jobsRequested = [];
+  }
+}
+
 export const slice = createSlice({
   name: "db",
   initialState: {
@@ -325,25 +348,13 @@ export const slice = createSlice({
 
     addExperiment(draft, action: PayloadAction<Experiment>) {
       const exp = action.payload;
-      const prevExp = draft.experiments.byId[exp.experiment_id];
-      const prevRunId = prevExp?.current_run_id;
+      const prevRunId = draft.experiments.byId[exp.experiment_id]?.current_run_id;
       if (draft.experiments.byId[exp.experiment_id] === undefined) {
         draft.experiments.ids.push(exp.experiment_id);
       }
       draft.experiments.byId[exp.experiment_id] = exp;
 
-      // If the current run changed on the active experiment while viewing "current run",
-      // clear the cached jobs so they are refetched for the new run
-      if (
-        draft.currentExperiment === exp.experiment_id &&
-        draft.currentRun === null &&
-        exp.current_run_id &&
-        prevRunId &&
-        prevRunId !== exp.current_run_id
-      ) {
-        draft.jobs = { byId: {}, ids: [] };
-        draft.jobsRequested = [];
-      }
+      dropJobsOnRunChange(draft, exp.experiment_id, prevRunId, exp.current_run_id);
 
       // Set as current experiment if it's the first one, unless the route
       // names the experiment(s) shown
@@ -363,19 +374,9 @@ export const slice = createSlice({
     ) {
       const exp = action.payload;
       if (draft.experiments.byId[exp.experiment_id] !== undefined) {
-        const prevExp = draft.experiments.byId[exp.experiment_id];
-        const prevRunId = prevExp.current_run_id;
+        const prevRunId = draft.experiments.byId[exp.experiment_id].current_run_id;
         _.merge(draft.experiments.byId[exp.experiment_id], exp);
-        if (
-          draft.currentExperiment === exp.experiment_id &&
-          draft.currentRun === null &&
-          exp.current_run_id &&
-          prevRunId &&
-          prevRunId !== exp.current_run_id
-        ) {
-          draft.jobs = { byId: {}, ids: [] };
-          draft.jobsRequested = [];
-        }
+        dropJobsOnRunChange(draft, exp.experiment_id, prevRunId, exp.current_run_id);
       }
     },
 

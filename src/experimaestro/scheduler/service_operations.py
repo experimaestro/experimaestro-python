@@ -31,7 +31,11 @@ def find_service(
 ) -> BaseService | None:
     """Service of an experiment (current run or specific run), if any"""
     return next(
-        (s for s in provider.get_services(experiment_id, run_id=run_id) if s.id == service_id),
+        (
+            s
+            for s in provider.get_services(experiment_id, run_id=run_id)
+            if s.id == service_id
+        ),
         None,
     )
 

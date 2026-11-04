@@ -87,8 +87,10 @@ Then open `http://localhost:12345` in your browser.
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
   usage; kill or delete them one by one, or all at once (with confirmation)
 - **Services**: The services of the selected experiment (of all experiments by
-  default), also when the experiment is not running; start, stop and open
-  them (through `/services/<experiment>/<service>/`), or view their logs
+  default) and run (the current one by default, or the one chosen with the
+  run selector), also when the experiment is not running; start, stop and
+  open them (through `/services/<experiment>/<service>/`, with `?runId=<run>`
+  for a service of a given run), or view their logs
 - **Active Services**: The services starting or running, of all the
   experiments, are listed under the navigation bar on every page (with their
   experiment), with links to open them, see their logs or stop them

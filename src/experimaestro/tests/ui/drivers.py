@@ -248,8 +248,11 @@ class UIDriver(Protocol):
         """Delete every finished orphan job (confirming if asked)"""
         ...
 
-    async def services(self, experiment_id: str) -> dict[str, str]:
-        """Services of an experiment, with their (lowercase) state"""
+    async def services(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        """Services of an experiment (its current run by default), with their
+        (lowercase) state"""
         ...
 
     async def graph(
@@ -265,13 +268,13 @@ class UIDriver(Protocol):
         ...
 
     async def start_service(
-        self, experiment_id: str, service_id: str
+        self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
-        """Start a service (None if not offered)"""
+        """Start a service (of the current run by default; None if not offered)"""
         ...
 
     async def stop_service(
-        self, experiment_id: str, service_id: str
+        self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
         """Stop a service (None if not offered)"""
         ...

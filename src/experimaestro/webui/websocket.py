@@ -667,19 +667,13 @@ class WebSocketHandler:
             )
         return payloads
 
-    async def _in_thread(self, function, *args, **kwargs):
+    async def _in_thread(self, function, *args):
         """Run blocking state provider reads outside the event loop
 
         They can take a while (e.g. over SSH): the other connections, and the
         messages already sent on this one, are not held up meanwhile.
         """
         loop = asyncio.get_running_loop()
-        if kwargs:
-            import functools
-
-            return await loop.run_in_executor(
-                None, functools.partial(function, *args, **kwargs)
-            )
         return await loop.run_in_executor(None, function, *args)
 
     def _jobs_payloads(

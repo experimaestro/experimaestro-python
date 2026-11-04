@@ -12,7 +12,7 @@ from datetime import datetime
 import pytest
 
 from experimaestro.scheduler.query_cache import MISSING, QueryCache
-from experimaestro.scheduler.state_provider import MockExperiment, MockJob
+from experimaestro.scheduler.state_provider import MockExperiment, MockJob, MockService
 from experimaestro.scheduler.state_provider import OfflineStateProvider
 from experimaestro.scheduler.state_status import (
     ActionAddedEvent,
@@ -22,6 +22,7 @@ from experimaestro.scheduler.state_status import (
     JobTag,
     RunUpdatedEvent,
     ServiceAddedEvent,
+    ServiceStateChangedEvent,
 )
 
 
@@ -32,6 +33,8 @@ class CountingProvider(OfflineStateProvider):
         super().__init__()
         self.calls: Counter = Counter()
         self.experiment_ids = list(experiment_ids)
+        # Stored services, by (experiment, run)
+        self.services: dict[tuple[str, str], list[MockService]] = {}
 
     def _make_job(self, experiment_id: str) -> MockJob:
         return MockJob(
@@ -110,7 +113,7 @@ class CountingProvider(OfflineStateProvider):
 
     def _fetch_services_from_storage(self, experiment_id, run_id):
         self.calls[f"services:{experiment_id}"] += 1
-        return []
+        return list(self.services.get((experiment_id, run_id), []))
 
     def _create_job(self, full_id, *args, **kwargs):
         return self._make_job(full_id)
@@ -464,7 +467,7 @@ def test_current_run_invalidated_on_new_run_event(provider):
 
 
 def test_service_added_event_invalidates_services_cache(provider):
-    """When a service is added, cached services for that experiment/run are invalidated"""
+    """A new service drops the cached services of its run"""
     provider.get_services("exp1", run_id="run1")
     assert provider.calls["services:exp1"] == 1
 
@@ -476,3 +479,51 @@ def test_service_added_event_invalidates_services_cache(provider):
     )
     provider.get_services("exp1", run_id="run1")
     assert provider.calls["services:exp1"] == 2
+
+
+def _service(service_id: str, run_id: str) -> MockService:
+    return MockService(
+        service_id=service_id,
+        description_text="",
+        state_dict_data={},
+        experiment_id="exp1",
+        run_id=run_id,
+        state="STOPPED",
+    )
+
+
+def test_service_added_event_keeps_other_runs(provider):
+    """A new service keeps the cached services of the other runs, and those
+    that already list it (the same instances are returned)"""
+    provider.services[("exp1", "run1")] = [_service("s1", "run1")]
+    provider.services[("exp1", "run2")] = [_service("s1", "run2")]
+    run1 = provider.get_services("exp1", run_id="run1")
+    run2 = provider.get_services("exp1", run_id="run2")
+    assert provider.calls["services:exp1"] == 2
+
+    # Already known (e.g. replayed event), or added to another run
+    provider.apply_event(
+        ServiceAddedEvent(experiment_id="exp1", run_id="run1", service_id="s1")
+    )
+    provider.apply_event(
+        ServiceAddedEvent(experiment_id="exp1", run_id="run3", service_id="s2")
+    )
+    assert provider.get_services("exp1", run_id="run1")[0] is run1[0]
+    assert provider.get_services("exp1", run_id="run2")[0] is run2[0]
+    assert provider.calls["services:exp1"] == 2
+
+
+def test_service_state_changed_updates_cached_services(provider):
+    """A service state change updates the cached service in place"""
+    provider.services[("exp1", "run1")] = [_service("s1", "run1")]
+    (service,) = provider.get_services("exp1", run_id="run1")
+
+    provider.apply_event(
+        ServiceStateChangedEvent(
+            experiment_id="exp1", run_id="run1", service_id="s1", state="RUNNING"
+        )
+    )
+    (cached,) = provider.get_services("exp1", run_id="run1")
+    assert cached is service
+    assert cached.state.name == "RUNNING"
+    assert provider.calls["services:exp1"] == 1

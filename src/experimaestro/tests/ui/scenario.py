@@ -257,6 +257,11 @@ SERVICES = {
     "baseline": [("tensorboard", "TensorBoard (baseline)")],
 }
 
+#: Services of former runs, by (experiment, run)
+FORMER_RUN_SERVICES = {
+    ("baseline", "20260101_100000"): [("notebook", "Notebook (first run)")],
+}
+
 
 def stdout_text(job_id: str) -> str:
     return f"stdout of {job_id}\nsecond line\n"
@@ -305,9 +310,12 @@ class ScenarioProvider(OfflineStateProvider):
             self.orphans.append(spec.identifier)
         (self.jobs[ORPHAN_DONE].path / "data.bin").write_bytes(b"x" * ORPHAN_DATA_SIZE)
 
-        for xp_id, services in SERVICES.items():
-            run_id = self.runs[xp_id][-1].run_id
-            self.services[xp_id] = [
+        runs_services = {
+            (xp_id, self.runs[xp_id][-1].run_id): services
+            for xp_id, services in SERVICES.items()
+        } | FORMER_RUN_SERVICES
+        for (xp_id, run_id), services in runs_services.items():
+            self.services.setdefault(xp_id, []).extend(
                 MockService(
                     service_id,
                     description,
@@ -317,7 +325,7 @@ class ScenarioProvider(OfflineStateProvider):
                     run_id=run_id,
                 )
                 for service_id, description in services
-            ]
+            )
 
     def _add_job(self, spec: JobSpec) -> MockJob:
         path = self.workspace / "jobs" / spec.task_id / spec.identifier
@@ -502,7 +510,7 @@ class ScenarioProvider(OfflineStateProvider):
     def _fetch_services_from_storage(self, experiment_id, run_id):
         if experiment_id is None:
             return [s for services in self.services.values() for s in services]
-        return list(self.services.get(experiment_id, []))
+        return [s for s in self.services.get(experiment_id, []) if s.run_id == run_id]
 
     # --- Operations
 

@@ -22,12 +22,18 @@ from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TYPE_CHECKING
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 
 if TYPE_CHECKING:
     from experimaestro.core.serialization import ExperimentInfo
     from experimaestro.logs.source import LogSource
-    from experimaestro.scheduler.state_status import ExperimentEventBase, WarningEvent
+    from experimaestro.scheduler.state_status import (
+        ExperimentEventBase,
+        ServiceAddedEvent,
+        ServiceEventBase,
+        ServiceStateChangedEvent,
+        WarningEvent,
+    )
 
 from experimaestro.scheduler.interfaces import (
     BaseAction,
@@ -1375,7 +1381,10 @@ class OfflineStateProvider(StateProvider):
           cached experiments (job counts)
         - ActionAddedEvent: applied to the cached experiments, drops the
           cached objects of the run
-        - ExperimentUpdatedEvent: Invalidates experiment cache
+        - ExperimentUpdatedEvent / RunUpdatedEvent / RunCompletedEvent:
+          invalidate the experiment cache (the current run may change)
+        - ServiceStateChangedEvent: updates the cached services in place
+        - ServiceAddedEvent: drops the cached services lists of its run
 
         Cached queries are invalidated for the events that change *which*
         entities exist: state/progress/carbon events update the cached job
@@ -1386,7 +1395,6 @@ class OfflineStateProvider(StateProvider):
         from experimaestro.scheduler.state_status import (
             ActionAddedEvent,
             CarbonMetricsEvent,
-            ExperimentEventBase,
             ExperimentJobStateEvent,
             JobStateChangedEvent,
             JobProgressEvent,
@@ -1397,14 +1405,6 @@ class OfflineStateProvider(StateProvider):
             ServiceAddedEvent,
             ServiceStateChangedEvent,
         )
-
-        # Invalidate current run cache if an event arrives for a different run
-        if isinstance(event, ExperimentEventBase):
-            cached_curr_run = self._query_cache.get(("current_run", event.experiment_id))
-            if cached_curr_run is not MISSING and cached_curr_run is not None:
-                event_run_id = getattr(event, "run_id", "") or None
-                if event_run_id and event_run_id != cached_curr_run:
-                    self._clear_experiment_cache(event.experiment_id)
 
         # Handle job state/progress/carbon events
         if isinstance(
@@ -1432,28 +1432,56 @@ class OfflineStateProvider(StateProvider):
             self._apply_to_cached_experiments(event)
             self._update_cached_queries(event)
 
-        # Handle experiment/run events - invalidate cache to force refresh
+        # Experiment/run events (a new run, a run that ended): which run is
+        # current and the runs themselves change, so the experiment is re-read
         elif isinstance(
             event, (ExperimentUpdatedEvent, RunUpdatedEvent, RunCompletedEvent)
         ):
-            if isinstance(event, (RunUpdatedEvent, RunCompletedEvent)):
-                self._apply_to_cached_experiments(event)
-            self._query_cache.invalidate(event.experiment_id)
-            with self._experiment_cache_lock:
-                keys_to_remove = [
-                    k for k in self._experiment_cache if k[0] == event.experiment_id
-                ]
-                for key in keys_to_remove:
-                    del self._experiment_cache[key]
+            self._clear_experiment_cache(event.experiment_id)
 
-        # Handle service events - update cached experiments and drop cached service queries
-        elif isinstance(event, (ServiceAddedEvent, ServiceStateChangedEvent)):
+        # Service events: the cached experiments are updated in place (state
+        # of their services); a new service changes the membership of the
+        # cached services lists of its run, which are dropped (and only them,
+        # to keep the started service instances of the other runs)
+        elif isinstance(event, ServiceStateChangedEvent):
             self._apply_to_cached_experiments(event)
-            for key, _ in self._query_cache.entries():
-                if key[0] == "services" and len(key) >= 3 and key[1] == event.experiment_id:
-                    cached_run_id = key[2]
-                    if not event.run_id or cached_run_id is None or cached_run_id == event.run_id:
-                        self._query_cache.drop(key)
+            self._update_cached_service_state(event)
+
+        elif isinstance(event, ServiceAddedEvent):
+            self._apply_to_cached_experiments(event)
+            self._drop_cached_services(event)
+
+    def _cached_services_of(
+        self, event: "ServiceEventBase"
+    ) -> list[tuple[Hashable, list["BaseService"]]]:
+        """Cached services lists (key, services) of the run of a service event
+
+        Events without a run id match every run of the experiment.
+        """
+        return [
+            (key, entry.value)
+            for key, entry in self._query_cache.entries()
+            if key[0] == "services"
+            and key[1] == event.experiment_id
+            and (not event.run_id or key[2] == event.run_id)
+        ]
+
+    def _update_cached_service_state(self, event: "ServiceStateChangedEvent") -> None:
+        """Update the state of the cached (read-only) services in place
+
+        Only the services read from storage follow the events: the services
+        started by this process manage their own state.
+        """
+        for _, services in self._cached_services_of(event):
+            for service in services:
+                if service.id == event.service_id and isinstance(service, MockService):
+                    service._state_name = event.state
+
+    def _drop_cached_services(self, event: "ServiceAddedEvent") -> None:
+        """Drop the cached services lists that miss the added service"""
+        for key, services in self._cached_services_of(event):
+            if all(service.id != event.service_id for service in services):
+                self._query_cache.drop(key)
 
     def _apply_to_cached_experiments(self, event: "ExperimentEventBase") -> None:
         """Apply an experiment event to the cached runs of its experiment
@@ -1668,8 +1696,8 @@ class OfflineStateProvider(StateProvider):
                 all_services.extend(exp_services)
             return all_services
 
-        # Resolve run_id if needed
-        if run_id is None:
+        # Resolve run_id if needed (events without a run give an empty one)
+        if not run_id:
             run_id = self.get_current_run(experiment_id, refresh=refresh)
             if run_id is None:
                 return []
