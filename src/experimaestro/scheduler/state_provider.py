@@ -2242,7 +2242,14 @@ class MockExperiment(BaseExperiment):
 
     @property
     def dependencies(self) -> dict[str, list[str]]:
-        return self._dependencies
+        """Job dependencies, from jobs.jsonl and the replayed events"""
+        dependencies = {
+            job_id: job_info.depends_on
+            for job_id, job_info in self.job_infos.items()
+            if job_info.depends_on
+        }
+        dependencies.update(self._dependencies)
+        return dependencies
 
     @property
     def events_count(self) -> int:

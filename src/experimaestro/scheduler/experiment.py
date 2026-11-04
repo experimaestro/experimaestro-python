@@ -17,7 +17,7 @@ from experimaestro.exceptions import HandledException
 from experimaestro.utils.crashpoints import crashpoint
 
 from experimaestro.scheduler.signal_handler import SIGNAL_HANDLER
-from experimaestro.scheduler.jobs import Job
+from experimaestro.scheduler.jobs import Job, JobDependency
 from experimaestro.scheduler.services import Service
 from experimaestro.scheduler.workspace import RunMode, Workspace
 from experimaestro.scheduler.interfaces import (
@@ -642,11 +642,19 @@ class experiment(BaseExperiment):
         # Get tags from config (tags are experiment-specific, not stored on Job)
         job_tags = dict(job.config.tags().items()) if job.config.tags() else {}
 
+        # Job IDs this job depends on (same as the scheduler's run info)
+        depends_on = [
+            dep.origin.identifier
+            for dep in job.dependencies
+            if isinstance(dep, JobDependency)
+        ]
+
         job_info = ExperimentJobInformation(
             job_id=job.identifier,
             task_id=str(job.type.identifier),
             tags=job_tags,
             timestamp=time.time(),
+            depends_on=depends_on,
         )
 
         with self.jobs_jsonl_path.open("a") as f:
@@ -662,13 +670,6 @@ class experiment(BaseExperiment):
         # Write initial ExperimentJobStateEvent to filesystem (only in NORMAL mode)
         if self._event_writer is not None:
             from .state_status import ExperimentJobStateEvent, JobTag
-
-            # Get dependency job IDs
-            depends_on = []
-            if hasattr(job, "dependencies"):
-                for dep in job.dependencies:
-                    if hasattr(dep, "identifier"):
-                        depends_on.append(dep.identifier)
 
             from experimaestro.scheduler.interfaces import serialize_timestamp
 

@@ -50,6 +50,8 @@ class ExperimentJobInformation:
     tags: dict[str, str] = field(default_factory=dict)
     timestamp: float | None = None
     transient: int = 0
+    #: Identifiers of the jobs this job depends on (in this experiment)
+    depends_on: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary for JSON"""
@@ -61,6 +63,8 @@ class ExperimentJobInformation:
         }
         if self.transient:
             result["transient"] = self.transient
+        if self.depends_on:
+            result["depends_on"] = self.depends_on
         return result
 
     @classmethod
@@ -71,6 +75,7 @@ class ExperimentJobInformation:
             task_id=d["task_id"],
             tags=d.get("tags", {}),
             timestamp=d.get("timestamp"),
+            depends_on=d.get("depends_on", []),
         )
 
 

@@ -337,6 +337,41 @@ def test_load_from_workspace():
     assert by_name["Encoder"].tags == {"dim": 4}
 
 
+@pytest.mark.tasks
+def test_dependencies_map_from_workspace():
+    """The job dependencies shown by the monitors (job details) are read back
+    from the experiment events"""
+    from experimaestro.scheduler.workspace_state_provider import (
+        WorkspaceStateProvider,
+    )
+
+    with TemporaryDirectory(prefix="xpm") as workdir:
+        with TemporaryExperiment("deps", workdir=workdir):
+            train = Train.C(encoder=Encoder.C(dim=4))
+            score = Score.C(trained=train.submit())
+            score.submit()
+            train_id = train.__xpm__.job.identifier
+            score_id = score.__xpm__.job.identifier
+
+            # While the experiment runs
+            provider = WorkspaceStateProvider(workdir, no_cleanup=True)
+            try:
+                running = provider.get_dependencies_map("deps")
+            finally:
+                provider.close()
+
+        # Once it is over
+        provider = WorkspaceStateProvider(workdir, no_cleanup=True)
+        try:
+            done = provider.get_dependencies_map("deps")
+        finally:
+            provider.close()
+
+    for deps in (running, done):
+        assert deps.get(score_id) == [train_id]
+        assert not deps.get(train_id)
+
+
 class WaitingLearn(ResumableTask):
     """Outputs a checkpoint when told to, then runs until released"""
 
@@ -461,13 +496,15 @@ def test_load_serialized_graph_and_mermaid(tmp_path: Path):
     # Mermaid diagram generation
     mmd = to_mermaid(graph)
     assert "graph TD" in mmd
-    assert 'Learner (stub)' in mmd
-    assert 'Train' in mmd
-    assert 'ModelLoader' in mmd
+    assert "Learner (stub)" in mmd
+    assert "Train" in mmd
+    assert "ModelLoader" in mmd
 
     # 2. params.json format (dict with "objects")
     params_file = tmp_path / "params.json"
-    params_file.write_text(json.dumps({"objects": objects, "version": 1}), encoding="utf-8")
+    params_file.write_text(
+        json.dumps({"objects": objects, "version": 1}), encoding="utf-8"
+    )
     graph_params = load_serialized_graph(params_file)
     assert len(graph_params.nodes) == len(graph.nodes)
 
@@ -488,4 +525,3 @@ def test_load_serialized_graph_and_mermaid(tmp_path: Path):
     mmd_pure = to_mermaid(graph_pure)
     assert "ConfigA" in mmd_pure
     assert "ConfigB" in mmd_pure
-
