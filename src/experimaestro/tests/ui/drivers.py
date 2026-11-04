@@ -224,8 +224,8 @@ class UIDriver(Protocol):
         ...
 
     async def copy_job_id(self, job_id: str, *, shift: bool = False) -> str | None:
-        """Click (with shift if asked) the identifier of a job in the job list;
-        returns what was copied to the clipboard (None if nothing)"""
+        """Copy the identifier (or, with shift, the folder) of a job in the job
+        list; returns what was copied to the clipboard (None if nothing)"""
         ...
 
     async def kill_job(self, job_id: str) -> Notification | None:

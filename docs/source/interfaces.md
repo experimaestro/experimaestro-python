@@ -72,13 +72,17 @@ Then open `http://localhost:12345` in your browser.
 - **Failure reasons**: the status of a failed job tells why it failed with the
   icon of the TUI (❌ the job failed, 🔗 a dependency failed, ⏱ timeout,
   💾 memory, 🚫 rejected by the launcher); hover it for the description
-- **Job Details**: Click on a job to view parameters, logs, output paths, its
-  failure reason with what happened (see below) and its dependencies with their status (click a dependency to
-  open its details, e.g. to find the job at the source of a failure)
-- **Copying**: In the job list, a click on the task name copies it, a click on
-  the job hash copies `<task id>/<job id>` and a shift-click on the job hash
-  copies the job folder (for a workspace monitored over SSH, the remote
-  folder); a notification at the top right tells what was copied
+- **Job actions**: hovering a job in the job list shows its actions at the
+  end of the row, each with a key acting on the hovered job (shown when
+  hovering the icon): details (`i`), logs (`l`), copy `<task id>/<job id>`
+  (`c`), copy the job folder (`f`; for a workspace monitored over SSH, the
+  remote folder), kill (`k`, running jobs) and delete (`d`); kill and delete
+  ask for confirmation, and a notification at the top right tells what was
+  copied. The duration and CO₂ of a job are below its submission date
+- **Job Details**: The details of a job show its parameters, logs, output
+  paths, its failure reason with what happened (see below) and its
+  dependencies with their status (click a dependency to open its details,
+  e.g. to find the job at the source of a failure)
 - **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser (stderr
   first), once the job has started (the logs of a waiting or scheduled job

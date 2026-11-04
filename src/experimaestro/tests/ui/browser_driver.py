@@ -155,11 +155,17 @@ class BrowserDriver:
     def _job_row(self, job_id: str) -> Locator:
         return self.page.locator(f"tr.job-row[data-job-id='{job_id}']")
 
+    async def _job_action_icon(self, job_id: str, action: str) -> Locator:
+        """The icon of a job action (shown when the job is hovered)"""
+        row = self._job_row(job_id)
+        await row.hover()
+        return row.locator(f"i[data-action='{action}']")
+
     async def _job_action(
         self, job_id: str, title: str, confirm: str
     ) -> Notification | None:
         await self._close_modals()
-        action = self._job_row(job_id).locator(f"i[title='{title}']")
+        action = await self._job_action_icon(job_id, title.lower())
         if not await action.count():
             return None
         start = await self.page.locator(".toast").count()
@@ -425,7 +431,7 @@ class BrowserDriver:
 
     async def logs_offered(self, job_id: str) -> bool:
         await self._close_modals()
-        from_list = await self._job_row(job_id).locator("i[title='Logs']").count() > 0
+        from_list = await (await self._job_action_icon(job_id, "logs")).count() > 0
         modal = await self._open_job_detail(job_id)
         tab = modal.get_by_role("tab", name="Logs", exact=True)
         from_detail = await tab.is_enabled()
@@ -435,7 +441,7 @@ class BrowserDriver:
 
     async def _open_job_detail(self, job_id: str) -> Locator:
         await self._close_modals()
-        await self._job_row(job_id).locator("i[title='Details']").click()
+        await (await self._job_action_icon(job_id, "details")).click()
         modal = self.page.locator(".modal.show")
         await modal.wait_for()
         await self.settle()
@@ -482,7 +488,7 @@ class BrowserDriver:
 
     async def _open_log(self, job_id: str) -> Locator:
         await self._close_modals()
-        await self._job_row(job_id).locator("i[title='Logs']").click()
+        await (await self._job_action_icon(job_id, "logs")).click()
         modal = self.page.locator(".modal.show")
         await modal.wait_for()
         return modal
@@ -558,7 +564,7 @@ class BrowserDriver:
 
     async def job_path(self, job_id: str) -> str:
         await self._close_modals()
-        await self._job_row(job_id).locator("i[title='Details']").click()
+        await (await self._job_action_icon(job_id, "details")).click()
         modal = self.page.locator(".modal.show")
         await modal.wait_for()
         await self.settle()
@@ -581,11 +587,8 @@ class BrowserDriver:
                 });
             }"""
         )
-        await (
-            self._job_row(job_id)
-            .locator(".job-id")
-            .click(modifiers=["Shift"] if shift else [])
-        )
+        action = "copy-folder" if shift else "copy-id"
+        await (await self._job_action_icon(job_id, action)).click()
         await self.settle()
         return await self.page.evaluate("() => window.__xpmCopied")
 

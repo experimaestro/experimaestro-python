@@ -1,59 +1,62 @@
 import React from "react";
-import { copyToClibpoard } from "./clipboard";
 import { Job } from "./reducers";
-import { useMessages } from "./ui/messages";
 import { formatShortDate, formatDuration, formatCO2 } from "./format";
 import { StatusBadge } from "./StatusBadge";
 import { TagBadges } from "./ui/tags";
 
 /** Number of columns of the job table */
-export const JOB_COLUMNS = 5;
+export const JOB_COLUMNS = 3;
+
+export type JobAction = "details" | "logs" | "copy-id" | "copy-folder" | "kill" | "delete";
+
+/** Actions on a job: icon, label and key (the TUI keys, without Ctrl) */
+export const JOB_ACTIONS: {
+  [key in JobAction]: { icon: string; label: string; key: string };
+} = {
+  details: { icon: "fas fa-eye", label: "Details", key: "i" },
+  logs: { icon: "fas fa-file-lines", label: "Logs", key: "l" },
+  "copy-id": { icon: "fas fa-clipboard", label: "Copy the job id", key: "c" },
+  "copy-folder": { icon: "fas fa-folder", label: "Copy the job folder", key: "f" },
+  kill: { icon: "fa fa-skull-crossbones", label: "Kill", key: "k" },
+  delete: { icon: "fa fa-trash", label: "Delete", key: "d" },
+};
+
+/** The actions available for a job */
+export function jobActions(job: Job): JobAction[] {
+  const actions: JobAction[] = ["details"];
+  if (job.started !== false) actions.push("logs");
+  actions.push("copy-id", "copy-folder");
+  if (job.status === "running") actions.push("kill");
+  actions.push("delete");
+  return actions;
+}
 
 export default ({
   job,
-  onKill,
-  onDelete,
-  onShow,
-  onLogs,
+  onAction,
+  onHover,
   hiddenTags,
 }: {
   job: Job;
-  onKill: () => void;
-  onDelete: () => void;
-  onShow: () => void;
-  onLogs: () => void;
+  onAction: (action: JobAction) => void;
+  // Called with true/false when the pointer enters/leaves the job
+  onHover: (hovered: boolean) => void;
   // Keys of the tags not shown
   hiddenTags: Set<string>;
 }) => {
-  const { success, error } = useMessages();
   const tags = job.tags.filter(([key]) => !hiddenTags.has(key));
   const progress = job.progress.length > 0 ? job.progress[0].progress : 0;
   return (
     <>
-      <tr className="job-row" data-job-id={job.jobId}>
+      <tr
+        className="job-row"
+        data-job-id={job.jobId}
+        onMouseEnter={() => onHover(true)}
+        onMouseLeave={() => onHover(false)}
+      >
         <td className="text-nowrap">
-          <span
-            className="clipboard task-id"
-            onClick={() =>
-              copyToClibpoard(job.taskId)
-                .then(() => success(`Task id copied: ${job.taskId}`))
-                .catch((e) => error("Error when copying: " + e))
-            }
-          >
-            {job.taskId}
-          </span>
-          <span
-            className="clipboard job-id ms-2"
-            title={`Click to copy the job id (${job.taskId}/${job.jobId}), shift+click to copy the job folder (${job.locator})`}
-            onClick={(event) => {
-              const [what, content] = event.shiftKey
-                ? ["Job folder", job.locator]
-                : ["Job id", `${job.taskId}/${job.jobId}`];
-              copyToClibpoard(content)
-                .then(() => success(`${what} copied: ${content}`))
-                .catch((e) => error(`Error when copying the ${what.toLowerCase()}: ${e}`));
-            }}
-          >
+          <span className="task-id">{job.taskId}</span>
+          <span className="job-id ms-2" title={`${job.taskId}/${job.jobId}`}>
             {job.jobId.substring(0, 12)}
           </span>
         </td>
@@ -62,31 +65,45 @@ export default ({
         <td rowSpan={2} className="job-status">
           <StatusBadge status={job.status} progress={progress} compact failure={job} />
         </td>
-        <td className="text-muted small text-nowrap">{formatShortDate(job.submitted)}</td>
-        <td rowSpan={2} className="text-muted small text-nowrap">
-          {formatCO2(job.carbon?.co2kg)}
-        </td>
-        <td rowSpan={2} className="job-actions text-nowrap">
-          <i className="fas fa-eye action" title="Details" onClick={onShow} />
-          {job.started !== false && (
-            <i className="fas fa-file-lines action" title="Logs" onClick={onLogs} />
-          )}
-          {job.status === "running" && (
-            <i className="fa fa-skull-crossbones action" title="Kill" onClick={onKill} />
-          )}
-          <i className="fa fa-trash action" title="Delete" onClick={onDelete} />
+        <td className="job-date text-muted small text-nowrap">
+          {formatShortDate(job.submitted)}
+          {/* Shown over the end of the row when the job is hovered */}
+          <div className="job-actions">
+            {jobActions(job).map((action) => {
+              const { icon, label, key } = JOB_ACTIONS[action];
+              return (
+                <i
+                  key={action}
+                  className={`${icon} action`}
+                  data-action={action}
+                  title={`${label} (${key})`}
+                  aria-label={label}
+                  onClick={() => onAction(action)}
+                />
+              );
+            })}
+          </div>
         </td>
       </tr>
       {/* Always present (even empty), so that all the jobs take the same space */}
-      <tr className="job-tags-row" data-tags-of={job.jobId}>
+      <tr
+        className="job-tags-row"
+        data-tags-of={job.jobId}
+        onMouseEnter={() => onHover(true)}
+        onMouseLeave={() => onHover(false)}
+      >
         <td>
           {/* One line, scrolling when the tags do not fit */}
-          <div className="job-tags-line">
-            {tags.length > 0 && <TagBadges tags={tags} />}
-          </div>
+          <div className="job-tags-line">{tags.length > 0 && <TagBadges tags={tags} />}</div>
         </td>
         <td className="text-muted small text-nowrap">
           {formatDuration(job.start, job.end)}
+          {(job.carbon?.co2kg ?? 0) > 0 && (
+            <span className="job-co2" title="CO₂ emissions">
+              {" · "}
+              {formatCO2(job.carbon?.co2kg)}
+            </span>
+          )}
         </td>
       </tr>
     </>

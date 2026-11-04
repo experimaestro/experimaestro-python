@@ -110,9 +110,7 @@ export function useMessages() {
 //
 const useStyles = createUseStyles({
   container: {
-    position: "fixed",
-    top: "10px",
-    right: "10px",
+    margin: "10px",
     zIndex: 1100,
   },
   body: {
@@ -133,7 +131,12 @@ export function Messages() {
   const dispatch = useDispatch();
 
   return (
-    <ToastContainer className={classes.container}>
+    // Fixed in the window (Bootstrap's toast container is absolute)
+    <ToastContainer
+      className={classes.container}
+      containerPosition="fixed"
+      position="top-end"
+    >
       {state.messages.map((snackbar) => (
         <Toast
           key={snackbar.id}

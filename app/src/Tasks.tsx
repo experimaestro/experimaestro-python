@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Badge, Button, Dropdown, Modal, Form, Table } from "react-bootstrap";
 
-import TaskJobs, { JOB_COLUMNS } from "./TaskJobs";
+import TaskJobs, { JOB_ACTIONS, JOB_COLUMNS, JobAction, jobActions } from "./TaskJobs";
 import JobModal, { JobTab } from "./JobModal";
 import client, { JobsFilterResult } from "./client";
 import { Job } from "./reducers";
 import { useMessages } from "./ui/messages";
+import { copyToClibpoard } from "./clipboard";
 import { useAppSelector, useNavigate } from "./store";
 import { useShortcuts } from "./shortcuts";
 import FilterInput from "./FilterInput";
@@ -32,8 +33,7 @@ const SORT_LABELS: { [key in SortKey]: { label: string; shortcut: string } } = {
 };
 
 // Same hint as the TUI search bar (FILTER_SYNTAX_HINT in cli/filter.py)
-const FILTER_SYNTAX_HINT =
-  "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or";
+const FILTER_SYNTAX_HINT = "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or";
 
 // Delay before sending the filter expression to the server
 const FILTER_DEBOUNCE_MS = 300;
@@ -138,20 +138,25 @@ export default () => {
     ids: Set<string> | null;
     error: string | null;
   }>({ ids: null, error: null });
-  const [confirm, setConfirm] = useState<{ job: Job; kind: "kill" | "delete" }>();
+  const [confirm, setConfirm] = useState<{
+    job: Job;
+    kind: "kill" | "delete";
+  }>();
   const [sortKey, setSortKey] = useState<SortKey>("status");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [groupBy, setGroupBy] = useState<GroupKey>("none");
   const [tagKey, setTagKey] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [hiddenTags, setHiddenTags] = useState<Set<string>>(loadHiddenTags);
-  const { info } = useMessages();
+  const { info, success, error } = useMessages();
   const jobs = useAppSelector((state) => state.db.jobs);
   const currentExperiment = useAppSelector((state) => state.db.currentExperiment);
   const currentRun = useAppSelector((state) => state.db.currentRun);
   const route = useAppSelector((state) => state.db.route);
   const navigate = useNavigate();
   const searchInput = useRef<HTMLInputElement>(null);
+  // The job under the pointer, target of the action keys
+  const hoveredJob = useRef<Job | null>(null);
 
   function changeSort(key: SortKey, ascending: boolean) {
     setSortKey(key);
@@ -190,6 +195,19 @@ export default () => {
     T: () => sortBy("task"),
     D: () => sortBy("date"),
     O: () => sortBy("name"),
+    // Actions on the hovered job
+    ...Object.fromEntries(
+      (Object.keys(JOB_ACTIONS) as JobAction[]).map((action) => [
+        JOB_ACTIONS[action].key,
+        () => {
+          const hovered = hoveredJob.current;
+          if (!hovered) return;
+          // Use the current state of the job
+          const job = jobs.byId[hovered.jobId];
+          if (job && jobActions(job).includes(action)) runAction(job, action);
+        },
+      ]),
+    ),
   });
 
   // --- Server-side filtering (same DSL and semantics as the TUI)
@@ -269,15 +287,7 @@ export default () => {
     };
 
     return result.sort(cmp);
-  }, [
-    jobs.ids,
-    jobs.byId,
-    trimmedQuery,
-    filterResult,
-    currentExperiment,
-    sortKey,
-    sortAsc,
-  ]);
+  }, [jobs.ids, jobs.byId, trimmedQuery, filterResult, currentExperiment, sortKey, sortAsc]);
 
   // --- Tags shown
 
@@ -286,8 +296,7 @@ export default () => {
     const keys = new Set<string>(hiddenTags);
     for (const id of jobs.ids) {
       const job = jobs.byId[id];
-      if (currentExperiment !== null && !job.experimentIds?.includes(currentExperiment))
-        continue;
+      if (currentExperiment !== null && !job.experimentIds?.includes(currentExperiment)) continue;
       for (const [k] of job.tags) keys.add(k);
     }
     return Array.from(keys).sort();
@@ -363,14 +372,39 @@ export default () => {
   const showJob = (job: Job, tab: JobTab) =>
     navigate({ ...route, job: { taskId: job.taskId, jobId: job.jobId, tab } });
 
+  const copy = (what: string, content: string) =>
+    copyToClibpoard(content)
+      .then(() => success(`${what} copied: ${content}`))
+      .catch((e) => error(`Error when copying the ${what.toLowerCase()}: ${e}`));
+
+  const runAction = (job: Job, action: JobAction) => {
+    switch (action) {
+      case "details":
+      case "logs":
+        showJob(job, action);
+        break;
+      case "kill":
+      case "delete":
+        setConfirm({ job, kind: action });
+        break;
+      case "copy-id":
+        copy("Job id", `${job.taskId}/${job.jobId}`);
+        break;
+      case "copy-folder":
+        copy("Job folder", job.locator);
+        break;
+    }
+  };
+
   const renderJob = (job: Job) => (
     <TaskJobs
       key={job.jobId}
       job={job}
-      onKill={() => setConfirm({ job, kind: "kill" })}
-      onDelete={() => setConfirm({ job, kind: "delete" })}
-      onShow={() => showJob(job, "details")}
-      onLogs={() => showJob(job, "logs")}
+      onAction={(action) => runAction(job, action)}
+      onHover={(hovered) => {
+        if (hovered) hoveredJob.current = job;
+        else if (hoveredJob.current?.jobId === job.jobId) hoveredJob.current = null;
+      }}
       hiddenTags={hiddenTags}
     />
   );
@@ -414,11 +448,7 @@ export default () => {
                 runId={currentRun}
                 placeholder="Filter (/): @state = 'done', @name ~ 'pattern', tag = 'value'"
                 isInvalid={!!trimmedQuery && filterResult.error !== null}
-                isValid={
-                  !!trimmedQuery &&
-                  filterResult.error === null &&
-                  filterResult.ids !== null
-                }
+                isValid={!!trimmedQuery && filterResult.error === null && filterResult.ids !== null}
               />
             </Form.Group>
             <Form.Group>
@@ -519,6 +549,12 @@ export default () => {
               ["T", "sort by task"],
               ["D", "sort by date"],
               ["O", "sort by job ID"],
+              [
+                Object.values(JOB_ACTIONS)
+                  .map(({ key }) => key)
+                  .join(" "),
+                "hovered job actions (see their icons)",
+              ],
             ]}
           />
         </div>
@@ -529,8 +565,19 @@ export default () => {
               <Modal.Title>Are you sure?</Modal.Title>
             </Modal.Header>
             <Modal.Body>
-              {confirm.kind === "kill" ? "Kill" : "Delete"} job{" "}
-              <b>{confirm.job.taskId}</b>?
+              {confirm.kind === "kill" ? "Kill" : "Delete"} the job?
+              <dl className="confirm-job small mt-2 mb-0">
+                <dt>Job</dt>
+                <dd>
+                  <code>
+                    {confirm.job.taskId}/{confirm.job.jobId}
+                  </code>
+                </dd>
+                <dt>Path</dt>
+                <dd>
+                  <code>{confirm.job.locator}</code>
+                </dd>
+              </dl>
               {confirm.kind === "delete" && (
                 <div className="text-danger small mt-2">
                   This removes the job directory from disk.
@@ -559,10 +606,8 @@ export default () => {
               {/* The duration is below the submission date */}
               <th>
                 <SortLabel {...sortProps("date")} />
-                {" · Duration"}
+                {" · Duration · CO₂"}
               </th>
-              <th>CO₂</th>
-              <th></th>
             </tr>
           </thead>
           {groups === null ? (
@@ -578,9 +623,7 @@ export default () => {
                     title={isCollapsed ? "Expand" : "Collapse"}
                   >
                     <td colSpan={JOB_COLUMNS}>
-                      <i
-                        className={`fas fa-chevron-${isCollapsed ? "right" : "down"} me-2`}
-                      />
+                      <i className={`fas fa-chevron-${isCollapsed ? "right" : "down"} me-2`} />
                       {groupBy === "tag" && (
                         <span className="text-muted me-1">{effectiveTagKey} =</span>
                       )}
@@ -594,9 +637,7 @@ export default () => {
                             key={status}
                             bg={STATUS_COLOR[status] || "light"}
                             text={
-                              ["warning", "info", undefined].includes(
-                                STATUS_COLOR[status],
-                              )
+                              ["warning", "info", undefined].includes(STATUS_COLOR[status])
                                 ? "dark"
                                 : undefined
                             }
