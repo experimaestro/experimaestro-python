@@ -37,6 +37,7 @@ from experimaestro.scheduler.state_provider import (
     CarbonMetricsData,
 )
 from experimaestro.scheduler.state_status import (
+    event_run_id,
     EventBase,
     JobEventBase,
     ExperimentEventBase,
@@ -1145,8 +1146,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         )
 
         run_id = self.get_current_run(experiment_id)
-        event_run_id = getattr(event, "run_id", "") or None
-        if event_run_id and run_id and event_run_id != run_id:
+        run_of_event = event_run_id(event)
+        if run_of_event and run_id and run_of_event != run_id:
             self._clear_experiment_cache(experiment_id)
             self._notify_state_listeners(
                 ExperimentUpdatedEvent(experiment_id=experiment_id)

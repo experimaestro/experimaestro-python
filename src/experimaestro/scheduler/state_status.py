@@ -502,6 +502,27 @@ class ConnectionState(str, Enum):
     DISCONNECTED = "disconnected"
 
 
+#: The events that belong to a run (they have a ``run_id``)
+RUN_EVENTS = (
+    JobSubmittedEvent,
+    ExperimentJobStateEvent,
+    RunUpdatedEvent,
+    RunCompletedEvent,
+    ServiceAddedEvent,
+    ServiceStateChangedEvent,
+    ActionAddedEvent,
+    WarningEvent,
+    ErrorEvent,
+)
+
+
+def event_run_id(event: EventBase) -> str | None:
+    """Run of an event (None if not given, or for events outside runs)"""
+    if isinstance(event, RUN_EVENTS):
+        return event.run_id or None
+    return None
+
+
 @dataclass
 class ConnectionStateEvent(EventBase):
     """Event: The connection of the state provider changed (remote providers)
@@ -2109,6 +2130,8 @@ class JobProgressReader:
 
 
 __all__ = [
+    "RUN_EVENTS",
+    "event_run_id",
     # Hardlink utilities
     "supports_hardlinks",
     "safe_link_or_copy",
