@@ -182,6 +182,18 @@ class UIDriver(Protocol):
         its link"""
         ...
 
+    async def back_from_dependency(
+        self, job_id: str, dependency_id: str
+    ) -> JobDetail | None:
+        """Open the detail view of a job, follow the link of a dependency, then
+        go back; returns the detail shown (None if the detail view closed)"""
+        ...
+
+    async def logs_offered(self, job_id: str) -> bool:
+        """Whether the logs of a job can be opened (from the job list and from
+        its detail view)"""
+        ...
+
     async def job_log(self, job_id: str, stream: Literal["stdout", "stderr"]) -> str:
         """Text of a job log, as displayed"""
         ...

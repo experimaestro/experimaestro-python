@@ -404,6 +404,35 @@ class BrowserDriver:
         await self._close_modals()
         return detail
 
+    async def back_from_dependency(
+        self, job_id: str, dependency_id: str
+    ) -> JobDetail | None:
+        modal = await self._open_job_detail(job_id)
+        await modal.locator(f"a.dependency[data-job-id='{dependency_id}']").click()
+        await self.page.wait_for_function(
+            "id => window.location.pathname.endsWith('/' + id)", arg=dependency_id
+        )
+        await self.page.go_back()
+        await self.settle()
+        if not await self.page.locator(".modal.show").count():
+            return None
+        shown = await self.page.evaluate(
+            "() => window.location.pathname.split('/').pop()"
+        )
+        detail = await self._read_job_detail(shown)
+        await self._close_modals()
+        return detail
+
+    async def logs_offered(self, job_id: str) -> bool:
+        await self._close_modals()
+        from_list = await self._job_row(job_id).locator("i[title='Logs']").count() > 0
+        modal = await self._open_job_detail(job_id)
+        tab = modal.get_by_role("tab", name="Logs", exact=True)
+        from_detail = await tab.is_enabled()
+        await self._close_modals()
+        assert from_list == from_detail
+        return from_detail
+
     async def _open_job_detail(self, job_id: str) -> Locator:
         await self._close_modals()
         await self._job_row(job_id).locator("i[title='Details']").click()

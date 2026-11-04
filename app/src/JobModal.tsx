@@ -30,7 +30,17 @@ const JobModal = ({
           <Tab eventKey="details" title="Details">
             <TaskDetailBody job={job} />
           </Tab>
-          <Tab eventKey="logs" title="Logs">
+          <Tab
+            eventKey="logs"
+            title={
+              job.started === false ? (
+                <span title="The job has not started yet: no logs">Logs</span>
+              ) : (
+                "Logs"
+              )
+            }
+            disabled={job.started === false}
+          >
             {tab === "logs" && (
               <LogPanel
                 target={{ kind: "job", taskId: job.taskId, jobId: job.jobId }}
@@ -62,7 +72,8 @@ export default () => {
   }, [job?.jobId]);
 
   if (!route.job || !job) return null;
-  const tab = route.job.tab;
+  // A job that has not started has no logs: show its details
+  const tab = job.started === false ? "details" : route.job.tab;
   return (
     <JobModal
       job={job}

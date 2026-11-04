@@ -18,6 +18,7 @@ from experimaestro.cli.filter import FILTER_SYNTAX_HINT, FilterContext, createFi
 from experimaestro.scheduler.interfaces import FailureDetails, JobState
 from experimaestro.scheduler.job_status import (
     failure_description,
+    has_started,
     retries_summary,
     status_rank,
 )
@@ -237,7 +238,9 @@ class DependencyList(Static):
         """Open the detail view of a dependency"""
         task_id = self.task_ids.get(job_id)
         if task_id:
-            self.post_message(JobSelected(job_id, task_id, self.experiment_id))
+            self.post_message(
+                JobSelected(job_id, task_id, self.experiment_id, from_job=True)
+            )
 
 
 class JobDetailView(Widget):
@@ -266,9 +269,13 @@ class JobDetailView(Widget):
         # Mapping from job_id to (task_id, state) for dependencies lookup
         self.jobs_info: dict[str, tuple[str, JobState | None]] = {}
         self.experiment_job_info: dict = {}  # job_id -> ExperimentJobInformation
+        #: Jobs shown before the current one (followed dependencies), as
+        #: (job_id, task_id, experiment_id, run_id), the last one first back
+        self.history: list[tuple[str, str, str, str | None]] = []
 
     def compose(self) -> ComposeResult:
         yield Label("Job Details", classes="section-title")
+        yield Label("", id="job-back-hint", classes="hidden")
         yield Static(
             "Loading job details...", id="job-detail-loading", classes="hidden"
         )
@@ -401,13 +408,59 @@ class JobDetailView(Widget):
         task_id: str,
         experiment_id: str,
         run_id: str | None = None,
+        *,
+        keep_history: bool = False,
     ) -> None:
         """Set the job to display
 
         Args:
             run_id: Run of the experiment the job is shown from, whose tags
                 and dependencies are displayed (None: the current run)
+            keep_history: The job is opened from the displayed one, which
+                going back (:meth:`go_back`) shows again; otherwise, the
+                history is cleared
         """
+        if not keep_history:
+            self.history = []
+        elif self.current_job_id and self.current_task_id:
+            if self.current_job_id == job_id:
+                return
+            self.history.append(
+                (
+                    self.current_job_id,
+                    self.current_task_id,
+                    self.current_experiment_id or "",
+                    self.current_run_id,
+                )
+            )
+        self._show_job(job_id, task_id, experiment_id, run_id)
+
+    def go_back(self) -> bool:
+        """Show the job displayed before the current one
+
+        Returns:
+            False if there is none (the details should be closed)
+        """
+        if not self.history:
+            return False
+        self._show_job(*self.history.pop())
+        return True
+
+    def _update_back_hint(self) -> None:
+        hint = self.query_one("#job-back-hint", Label)
+        if self.history:
+            _, task_id, _, _ = self.history[-1]
+            task_name = escape_markup(task_id.split(".")[-1])
+            hint.update(f"[dim]← esc: back to {task_name}[/dim]")
+            hint.remove_class("hidden")
+        else:
+            hint.add_class("hidden")
+
+    def _show_job(
+        self, job_id: str, task_id: str, experiment_id: str, run_id: str | None
+    ) -> None:
+        """Display a job (without changing the history)"""
+        self._update_back_hint()
         self.current_job_id = job_id
         self.current_task_id = task_id
         self.current_experiment_id = experiment_id
@@ -634,8 +687,12 @@ class JobDetailView(Widget):
         job_path = job.path
         task_id = job.task_id
         if job_path and task_id:
-            if self.state_provider.is_remote:
-                logs_exist = bool(job.state and job.state != JobState.SCHEDULED)
+            if not has_started(job.state):
+                # Log files, if any, are those of an earlier run
+                logs_exist = False
+                params_exist = self.state_provider.has_job_params(job)
+            elif self.state_provider.is_remote:
+                logs_exist = True
                 params_exist = self.state_provider.has_job_params(job)
             else:
                 task_name = task_id.split(".")[-1]
@@ -647,7 +704,8 @@ class JobDetailView(Widget):
             if logs_exist and params_exist:
                 hint = "[bold cyan]Press 'l' to view logs, 'i' to inspect params[/bold cyan]"
             elif params_exist:
-                hint = "[bold cyan]Press 'i' to inspect params[/bold cyan] [dim](no logs yet)[/dim]"
+                no_logs = "not started" if not has_started(job.state) else "no logs yet"
+                hint = f"[bold cyan]Press 'i' to inspect params[/bold cyan] [dim]({no_logs})[/dim]"
             elif logs_exist:
                 hint = "[bold cyan]Press 'l' to view logs[/bold cyan]"
             else:

@@ -81,7 +81,8 @@ Then open `http://localhost:12345` in your browser.
   folder); a notification at the top right tells what was copied
 - **Experiment Filtering**: Filter jobs by experiment ID and run
 - **Log Viewing**: View stdout/stderr logs directly in the browser (stderr
-  first). The end of a log is shown first and followed as it grows; earlier
+  first), once the job has started (the logs of a waiting or scheduled job
+  are those of an earlier run, and are not shown). The end of a log is shown first and followed as it grows; earlier
   lines are loaded when scrolling to the top. Progress bars (tqdm, nested ones
   included) are shown as in a terminal, on one line
 - **Orphan & Stray Jobs**: Jobs no experiment references, with their disk
@@ -162,7 +163,7 @@ experimaestro --workdir /path/to/workspace monitor --console
 - **Tree View**: Jobs grouped by status, task and/or tag (`t`)
 - **Job Details**: Process, carbon, tags, progress, the failure reason with
   what happened (see below) and the job dependencies with their status and failure reason (click a dependency to
-  open its details)
+  open its details, `Esc` to come back to the job it was opened from)
 - **Live Logs**: Real-time log output panel
 - **Keyboard Navigation**: Navigate and interact using keyboard shortcuts
 - **Status Bar**: Shows experiment status and connection info
@@ -202,7 +203,7 @@ Pressing the key of the current sort again reverses the order.
 
 | Key | Action |
 |-----|--------|
-| `l` | View job logs |
+| `l` | View job logs (once the job has started) |
 | `Ctrl+d` | Delete job |
 | `Ctrl+k` | Kill running job |
 | `/` | Open search filter |
