@@ -16,6 +16,7 @@ from experimaestro.logs.source import (
     RemoteLogSource,
     ServerLogSource,
 )
+from experimaestro.scheduler.remote import cache_dir
 from experimaestro.scheduler.remote.cache_dir import (
     MARKER,
     PREFIX,
@@ -155,7 +156,7 @@ def test_probe_delay_grows_while_unchanged():
     assert delay.delay == ProbeDelay.MIN
 
 
-def test_stale_cache_dirs_removed(tmp_path):
+def test_stale_cache_dirs_removed(tmp_path, monkeypatch):
     """Only the marked cache directories of the monitors gone are removed"""
 
     def cache(name: str, pid: int | None, host=socket.gethostname()):
@@ -165,8 +166,14 @@ def test_stale_cache_dirs_removed(tmp_path):
             (path / MARKER).write_text(json.dumps({"pid": pid, "host": host}))
         return path
 
-    # A process id that is not running
+    # A process id that is not running: a free one (e.g. the highest + 1) may
+    # be taken meanwhile by a process started by another test, so this one is
+    # declared gone
     gone = max(psutil.pids()) + 1
+    pid_exists = psutil.pid_exists
+    monkeypatch.setattr(
+        cache_dir.psutil, "pid_exists", lambda pid: pid != gone and pid_exists(pid)
+    )
     stale = cache("gone", gone)
     kept = [
         cache("running", os.getppid()),
