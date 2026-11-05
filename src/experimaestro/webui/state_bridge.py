@@ -246,6 +246,10 @@ class StateBridge:
             {
                 "actionId": event.action_id,
                 "experimentId": event.experiment_id,
+                # Added to the current run
+                "runId": event.run_id,
+                "pastRun": False,
+                "pastRunWarning": "",
                 "description": event.description,
                 "actionClass": event.action_class,
             },

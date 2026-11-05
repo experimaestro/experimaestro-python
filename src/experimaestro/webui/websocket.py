@@ -15,7 +15,11 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from experimaestro.scheduler import job_operations, service_operations
+from experimaestro.scheduler import (
+    action_operations,
+    job_operations,
+    service_operations,
+)
 from experimaestro.scheduler.event_filter import EventFilter
 from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import (
@@ -339,11 +343,25 @@ def serialize_connection_state(event: ConnectionStateEvent) -> dict[str, Any]:
     }
 
 
-def serialize_action(action: Any, experiment_id: str = "") -> dict[str, Any]:
-    """Serialize a BaseAction (live or mock) to the frontend format."""
+def serialize_action(
+    action: Any,
+    experiment_id: str = "",
+    run_id: str | None = None,
+    past_run: bool = False,
+) -> dict[str, Any]:
+    """Serialize a BaseAction (live or mock) to the frontend format.
+
+    ``pastRun`` is set for the actions of a former run, whose execution is
+    confirmed first (with ``pastRunWarning``).
+    """
+    from experimaestro.scheduler.action_operations import PAST_RUN_WARNING
+
     return {
         "actionId": getattr(action, "action_id", ""),
         "experimentId": experiment_id,
+        "runId": run_id or "",
+        "pastRun": past_run,
+        "pastRunWarning": PAST_RUN_WARNING.format(run_id=run_id) if past_run else "",
         "description": action.description() if hasattr(action, "description") else "",
         "actionClass": getattr(action, "action_class", ""),
     }
@@ -1154,55 +1172,67 @@ class WebSocketHandler:
         )
 
     async def _handle_actions(self, websocket: WebSocket, payload: dict[str, Any]):
-        """Send the actions declared by the (selected) experiment(s)."""
+        """Send the actions declared by an experiment run (the current run by
+        default), or by the current runs of all the experiments."""
         experiment_id = payload.get("experimentId")
-        if experiment_id:
-            experiments = [
-                await self._in_thread(self.state_provider.get_experiment, experiment_id)
-            ]
-        else:
-            experiments = await self._in_thread(self.state_provider.get_experiments)
-        for exp in experiments:
-            if exp is None:
-                continue
-            for action in (exp.actions or {}).values():
-                await websocket.send_json(
-                    {
-                        "type": "action.add",
-                        "payload": serialize_action(action, exp.experiment_id),
-                    }
+        run_id = payload.get("runId") or None
+
+        def gather() -> list[dict[str, Any]]:
+            if experiment_id:
+                scopes = [(experiment_id, run_id)]
+            else:
+                scopes = [
+                    (exp.experiment_id, None)
+                    for exp in self.state_provider.get_experiments()
+                ]
+            serialized = []
+            for exp_id, scope_run_id in scopes:
+                past = action_operations.is_past_run(
+                    self.state_provider, exp_id, scope_run_id
                 )
+                run = action_operations.run_experiment(
+                    self.state_provider, exp_id, scope_run_id
+                )
+                if run is None:
+                    continue
+                serialized.extend(
+                    serialize_action(action, exp_id, run.run_id, past)
+                    for action in run.actions.values()
+                )
+            return serialized
+
+        for action in await self._in_thread(gather):
+            await websocket.send_json({"type": "action.add", "payload": action})
 
     async def _handle_action_execute(
         self, websocket: WebSocket, payload: dict[str, Any]
     ):
-        """Execute an action, prompting the frontend for any missing inputs."""
+        """Execute an action of an experiment run (the current run by default),
+        prompting the frontend for any missing inputs.
+
+        The client confirms the execution of the action of a former run before
+        sending this request.
+        """
         from experimaestro.webui.actions import WebInteraction, ActionInputRequired
 
         experiment_id = payload.get("experimentId")
+        run_id = payload.get("runId") or None
         action_id = payload.get("actionId")
         inputs = payload.get("inputs") or {}
 
-        exp = (
-            self.state_provider.get_experiment(experiment_id) if experiment_id else None
-        )
-        if exp is None:
+        if (
+            not experiment_id
+            or self.state_provider.get_experiment(experiment_id) is None
+        ):
             await websocket.send_json(
                 {"type": "error", "payload": {"message": "Experiment not found"}}
             )
             return
 
         def run():
-            action_obj = (exp.actions or {}).get(action_id)
-            if action_obj is not None and hasattr(type(action_obj), "execute"):
-                action = action_obj
-            else:
-                from experimaestro.core.serialization import load_xp_info
-
-                xp_info = load_xp_info(exp.workdir)
-                if action_id not in xp_info.actions:
-                    raise ValueError(f"Action '{action_id}' not found")
-                action = xp_info.actions[action_id]
+            action = action_operations.load_action(
+                self.state_provider, experiment_id, action_id, run_id
+            )
             action.execute(WebInteraction(inputs))
 
         loop = asyncio.get_running_loop()
@@ -1221,6 +1251,7 @@ class WebSocketHandler:
                     "payload": {
                         "actionId": action_id,
                         "experimentId": experiment_id,
+                        "runId": run_id or "",
                         "field": e.field,
                         "inputs": inputs,
                     },

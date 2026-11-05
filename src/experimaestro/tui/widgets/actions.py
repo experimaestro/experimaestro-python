@@ -11,6 +11,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Static
 
 from experimaestro.actions import Interaction
+from experimaestro.scheduler import action_operations
+from experimaestro.scheduler.action_operations import PAST_RUN_WARNING
 from experimaestro.scheduler.state_provider import StateProvider
 
 logger = logging.getLogger("xpm.tui.actions")
@@ -121,6 +123,44 @@ class TextInputScreen(ModalScreen[str]):
             self.dismiss("")
 
 
+class PastRunActionConfirmScreen(ModalScreen[bool]):
+    """Confirms the execution of the action of a former run"""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, action_id: str, description: str, run_id: str):
+        super().__init__()
+        self._action_id = action_id
+        self._description = description
+        self._run_id = run_id
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="action-confirm-dialog"):
+            yield Static("Run an action of a former run?", id="action-confirm-title")
+            yield Static(
+                f"Action {self._action_id[:12]} ({self._description}) "
+                f"of run {self._run_id}",
+                id="action-confirm-message",
+            )
+            yield Static(
+                PAST_RUN_WARNING.format(run_id=self._run_id),
+                id="action-confirm-warning",
+            )
+            with Horizontal(id="action-confirm-buttons"):
+                yield Button("Run", variant="warning", id="action-confirm-yes")
+                yield Button("Cancel", variant="primary", id="action-confirm-no")
+
+    def on_mount(self) -> None:
+        """Focus cancel button by default"""
+        self.query_one("#action-confirm-no", Button).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "action-confirm-yes")
+
+
 # =============================================================================
 # TUI Interaction implementation
 # =============================================================================
@@ -173,8 +213,9 @@ class TUIInteraction(Interaction):
 class ActionsList(Vertical):
     """Widget displaying actions for selected experiment.
 
-    Actions are retrieved from the experiment's actions property.
-    Press Enter to execute the selected action interactively.
+    Actions are those of the run shown (the current run by default). Press
+    Enter to execute the selected action interactively (after a confirmation
+    for the action of a former run).
     """
 
     BINDINGS = [
@@ -214,23 +255,17 @@ class ActionsList(Vertical):
         self._refresh_display()
 
     def _refresh_display(self) -> None:
-        """Refresh the table from current experiment's actions"""
+        """Refresh the table from the actions of the run shown"""
         table = self.query_one("#actions-table", DataTable)
         table.clear()
 
         if not self.current_experiment:
             return
 
-        # Get experiment from state provider
-        experiments = list(self.state_provider.get_experiments())
-        matching = [
-            exp for exp in experiments if exp.experiment_id == self.current_experiment
-        ]
-        if not matching:
-            return
-
-        exp = matching[0]
-        for action_id, action in exp.actions.items():
+        actions = action_operations.run_actions(
+            self.state_provider, self.current_experiment, self.current_run_id
+        )
+        for action_id, action in actions.items():
             desc = action.description() if hasattr(action, "description") else ""
             action_class = getattr(action, "action_class", "")
             table.add_row(action_id, desc, action_class, key=action_id)
@@ -245,7 +280,7 @@ class ActionsList(Vertical):
         return None
 
     def action_execute_action(self) -> None:
-        """Execute the selected action"""
+        """Execute the selected action (confirmed first for a former run)"""
         action_id = self._get_selected_action_id()
         if not action_id:
             self.notify("No action selected", severity="warning")
@@ -255,42 +290,39 @@ class ActionsList(Vertical):
             self.notify("No experiment selected", severity="warning")
             return
 
-        # Find the experiment to get its workdir
-        experiments = list(self.state_provider.get_experiments())
-        matching = [
-            exp for exp in experiments if exp.experiment_id == self.current_experiment
-        ]
-        if not matching:
-            self.notify("Experiment not found", severity="error")
+        experiment_id, run_id = self.current_experiment, self.current_run_id
+        if not action_operations.is_past_run(
+            self.state_provider, experiment_id, run_id
+        ):
+            self._execute(experiment_id, None, action_id)
             return
 
-        exp = matching[0]
+        action = action_operations.run_actions(
+            self.state_provider, experiment_id, run_id
+        ).get(action_id)
+        description = action.description() if action is not None else ""
+
+        def confirmed(ok: bool | None) -> None:
+            if ok:
+                self._execute(experiment_id, run_id, action_id)
+
+        self.app.push_screen(
+            PastRunActionConfirmScreen(action_id, description, run_id), confirmed
+        )
+
+    def _execute(self, experiment_id: str, run_id: str | None, action_id: str):
         self.notify(f"Loading action {action_id}...", severity="information")
-        self._run_action_worker(exp, action_id)
+        self._run_action_worker(experiment_id, run_id, action_id)
 
     @work(thread=True, exclusive=True, group="action_execute")
-    def _run_action_worker(self, exp, action_id: str) -> None:
+    def _run_action_worker(
+        self, experiment_id: str, run_id: str | None, action_id: str
+    ) -> None:
         """Load and execute action in a background thread."""
         try:
-            # Check if this is a live experiment with actual Action objects
-            action_obj = exp.actions.get(action_id)
-            if action_obj and hasattr(type(action_obj), "execute"):
-                # Live action — execute directly
-                action = action_obj
-            else:
-                # Offline — load from objects.jsonl
-                from experimaestro.core.serialization import load_xp_info
-
-                xp_info = load_xp_info(exp.workdir)
-                if action_id not in xp_info.actions:
-                    self.app.call_from_thread(
-                        self.notify,
-                        f"Action '{action_id}' not found in objects.jsonl",
-                        severity="error",
-                    )
-                    return
-                action = xp_info.actions[action_id]
-
+            action = action_operations.load_action(
+                self.state_provider, experiment_id, action_id, run_id
+            )
             interaction = TUIInteraction(self.app)
             action.execute(interaction)
             self.app.call_from_thread(

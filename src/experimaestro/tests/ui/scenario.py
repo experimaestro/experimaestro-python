@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from experimaestro.core.serialization import ExperimentInfo
 from experimaestro.scheduler.interfaces import (
+    BaseAction,
     ExperimentJobInformation,
     ExperimentStatus,
     JobFailureStatus,
@@ -262,6 +264,23 @@ FORMER_RUN_SERVICES = {
     ("baseline", "20260101_100000"): [("notebook", "Notebook (first run)")],
 }
 
+#: Actions declared by the runs, by (experiment, run): (id, description)
+ACTIONS = {
+    ("baseline", "20260101_100000"): [("e1oldexport", "Export (first run)")],
+    ("baseline", "20260102_090000"): [("e2export", "Export")],
+}
+
+
+class RecordingAction:
+    """An executable action recording its executions in the provider"""
+
+    def __init__(self, provider: "ScenarioProvider", key: tuple[str, str, str]):
+        self.provider = provider
+        self.key = key
+
+    def execute(self, interaction) -> None:
+        self.provider.executed_actions.append(self.key)
+
 
 def stdout_text(job_id: str) -> str:
     return f"stdout of {job_id}\nsecond line\n"
@@ -298,6 +317,8 @@ class ScenarioProvider(OfflineStateProvider):
         self.services: dict[str, list[MockService]] = {}
 
         self.killed: list[str] = []
+        #: Executed actions, as (experiment, run, action)
+        self.executed_actions: list[tuple[str, str, str]] = []
         self.partials_cleanups = 0
         self._connection_state = ConnectionState.CONNECTED
 
@@ -380,6 +401,21 @@ class ScenarioProvider(OfflineStateProvider):
             )
         )
         self.run_jobs[(experiment_id, run.run_id)] = [s.identifier for s in run.jobs]
+        for action_id, description in ACTIONS.get((experiment_id, run.run_id), []):
+            self.runs[experiment_id][-1]._actions[action_id] = BaseAction(
+                action_id, description, "pkg.Export"
+            )
+
+    def load_xp_info(self, experiment_id, run_id=None):
+        # The actions of a run, as loaded from its serialized objects
+        run = self._run(experiment_id, run_id)
+        if run is None:
+            raise FileNotFoundError(f"No run {run_id} for {experiment_id}")
+        actions = {
+            action_id: RecordingAction(self, (experiment_id, run.run_id, action_id))
+            for action_id in run.actions
+        }
+        return ExperimentInfo(jobs={}, actions=actions)
 
     def submit(self, experiment_id: str, spec: JobSpec) -> None:
         """Submit a job to the current run of an experiment (as it runs)"""

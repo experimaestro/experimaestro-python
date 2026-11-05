@@ -95,11 +95,18 @@ experimaestro experiments actions run my-experiment ExportToHub \
     --set target="HF Hub" --set name="my-model" --set private=true
 ```
 
-### TUI
+### TUI and web UI
 
 In the experiment monitor TUI, select an experiment and navigate to the
 **Actions** tab to see registered actions. Press `Enter` on a selected
-action to execute it interactively.
+action to execute it interactively. In the web UI, open the **Actions** page
+of an experiment and click **Run**.
+
+Actions belong to an experiment *run*: both interfaces show the actions of the
+run shown — the current run by default, a former run once selected (runs
+history in the TUI, run selector in the web UI). Running the action of a former
+run is allowed, but asks for a confirmation first: the action is executed with
+the configuration of that run, which may be outdated.
 
 ## Interaction Protocol
 

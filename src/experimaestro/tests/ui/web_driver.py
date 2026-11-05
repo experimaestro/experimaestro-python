@@ -23,6 +23,7 @@ from experimaestro.webui.app import create_app
 
 from .drivers import (
     SEVERITIES,
+    ActionRun,
     JobDetail,
     Notification,
     OrphanRow,
@@ -49,6 +50,10 @@ class WebDriver:
         self.orphan_jobs: dict[str, dict[str, Any]] = {}
         #: Services by key ("<experiment>/<service>")
         self.services_by_key: dict[str, dict[str, Any]] = {}
+        #: Actions of the run shown, by "<experiment>/<action>"
+        self.actions_by_key: dict[str, dict[str, Any]] = {}
+        #: Results of the executed actions
+        self.action_results: list[dict[str, Any]] = []
         self.notifications: list[Notification] = []
         self._runs: dict[str, list[dict[str, Any]]] = {}
         self._filter: list[str] | None = None
@@ -92,6 +97,11 @@ class WebDriver:
                 self.orphan_jobs.pop(payload["jobId"], None)
             case "service.add" | "service.update":
                 self.services_by_key.setdefault(payload["key"], {}).update(payload)
+            case "action.add":
+                key = f"{payload['experimentId']}/{payload['actionId']}"
+                self.actions_by_key[key] = payload
+            case "action.result":
+                self.action_results.append(payload)
             case "notify":
                 self.notifications.append(
                     Notification(SEVERITIES[payload["severity"]], payload["message"])
@@ -452,6 +462,45 @@ class WebDriver:
         if run_id is not None:
             payload["runId"] = run_id
         return await self._notification("service.stop", **payload)
+
+    # --- Actions
+
+    async def actions(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        # As the client does when showing the actions of a run
+        self.actions_by_key.clear()
+        payload = {"experimentId": experiment_id}
+        if run_id is not None:
+            payload["runId"] = run_id
+        await self._request("actions", **payload)
+        return {
+            action["actionId"]: action["description"]
+            for action in self.actions_by_key.values()
+            if action["experimentId"] == experiment_id
+        }
+
+    async def run_action(
+        self,
+        experiment_id: str,
+        action_id: str,
+        run_id: str | None = None,
+        *,
+        confirm: bool = True,
+    ) -> ActionRun:
+        await self.actions(experiment_id, run_id)
+        action = self.actions_by_key[f"{experiment_id}/{action_id}"]
+        # The client asks for a confirmation for the action of a former run
+        warning = action["pastRunWarning"] if action["pastRun"] else None
+        if warning is not None and not confirm:
+            return ActionRun(warning, None)
+        start = len(self.action_results)
+        payload = {"experimentId": experiment_id, "actionId": action_id}
+        if action["runId"]:
+            payload["runId"] = action["runId"]
+        await self._request("action.execute", inputs={}, **payload)
+        (result,) = self.action_results[start:]
+        return ActionRun(warning, "info" if result["ok"] else "error")
 
     async def connection_state(self) -> str | None:
         # Receives what the server pushed

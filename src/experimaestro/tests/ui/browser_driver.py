@@ -30,6 +30,7 @@ from experimaestro.webui.app import create_app
 
 from .drivers import (
     SEVERITIES,
+    ActionRun,
     JobDetail,
     Notification,
     OrphanRow,
@@ -712,6 +713,54 @@ class BrowserDriver:
         self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
         return await self._service_action(experiment_id, service_id, "Stop", run_id)
+
+    # --- Actions
+
+    async def actions(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        await self.open_experiment(experiment_id, run_id)
+        await self._nav("Actions")
+        actions = {}
+        rows = self.page.locator(f"tr[data-experiment-id='{experiment_id}']")
+        for row in await rows.all():
+            actions[await row.get_attribute("data-action-id")] = (
+                await row.locator("td").nth(1).inner_text()
+            ).strip()
+        return actions
+
+    async def run_action(
+        self,
+        experiment_id: str,
+        action_id: str,
+        run_id: str | None = None,
+        *,
+        confirm: bool = True,
+    ) -> ActionRun:
+        await self.actions(experiment_id, run_id)
+        row = self.page.locator(
+            f"tr[data-experiment-id='{experiment_id}'][data-action-id='{action_id}']"
+        )
+        toasts = self.page.locator(".toast")
+        start = await toasts.count()
+        await row.get_by_role("button", name="Run", exact=True).click()
+        await self.settle()
+        warning = None
+        modal = self.page.locator(".modal.show")
+        if await modal.count():
+            warning = (
+                await modal.locator(".action-past-run-warning").inner_text()
+            ).strip()
+            label = "Run" if confirm else "Cancel"
+            await modal.get_by_role("button", name=label, exact=True).click()
+            await self.settle()
+        severities = []
+        for toast in (await toasts.all())[start:]:
+            if "Running action" in await toast.inner_text():
+                continue
+            classes = (await toast.get_attribute("class") or "").split()
+            severities += [_TOAST_CLASSES[c] for c in classes if c in _TOAST_CLASSES]
+        return ActionRun(warning, severities[-1] if severities else None)
 
     async def connection_state(self) -> str | None:
         await self.settle()

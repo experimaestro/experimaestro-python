@@ -95,6 +95,16 @@ class OrphanRow:
     size: int | None
 
 
+@dataclass
+class ActionRun:
+    """What happened when running an action"""
+
+    #: Warning of the confirmation asked first (None: run without asking)
+    warning: str | None
+    #: Severity of the outcome notification (None: not run, as cancelled)
+    severity: str | None
+
+
 class UIDriver(Protocol):
     #: Interface name, as used by the ``ui`` marker
     name: str
@@ -289,6 +299,25 @@ class UIDriver(Protocol):
         self, experiment_id: str, service_id: str, run_id: str | None = None
     ) -> Notification | None:
         """Stop a service (None if not offered)"""
+        ...
+
+    async def actions(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        """Actions declared by an experiment run (its current run by default),
+        with their description"""
+        ...
+
+    async def run_action(
+        self,
+        experiment_id: str,
+        action_id: str,
+        run_id: str | None = None,
+        *,
+        confirm: bool = True,
+    ) -> ActionRun:
+        """Run an action of an experiment run (the current run by default),
+        accepting (or declining) the confirmation if one is asked"""
         ...
 
     async def connection_state(self) -> str | None:

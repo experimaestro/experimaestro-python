@@ -169,9 +169,19 @@ export type Warning = {
 export type ActionInfo = {
   actionId: string;
   experimentId: string;
+  runId: string;
+  // A former run: its execution is confirmed first (with the warning)
+  pastRun: boolean;
+  pastRunWarning: string;
   description: string;
   actionClass: string;
 };
+
+// Key of an action in the store (the same action can be declared by several
+// experiments)
+export function actionKey(a: ActionInfo): string {
+  return `${a.experimentId}/${a.actionId}`;
+}
 
 const status2int = (status: JobStatus): number => {
   switch (status) {
@@ -454,11 +464,22 @@ export const slice = createSlice({
       );
     },
 
+    // Actions of the run shown, requested by the Actions page
+    clearActions(draft) {
+      draft.actions = { byId: {}, ids: [] };
+    },
+
     addAction(draft, { payload }: PayloadAction<ActionInfo>) {
-      if (draft.actions.byId[payload.actionId] === undefined) {
-        draft.actions.ids.push(payload.actionId);
+      // Actions added to a current run while another run is shown
+      if (draft.currentExperiment !== null) {
+        if (payload.experimentId !== draft.currentExperiment) return;
+        if (draft.currentRun !== null && payload.runId !== draft.currentRun) return;
       }
-      draft.actions.byId[payload.actionId] = payload;
+      const key = actionKey(payload);
+      if (draft.actions.byId[key] === undefined) {
+        draft.actions.ids.push(key);
+      }
+      draft.actions.byId[key] = payload;
     },
 
     setOrphans(draft, { payload }: PayloadAction<OrphanJob[]>) {

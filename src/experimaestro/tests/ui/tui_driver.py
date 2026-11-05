@@ -35,6 +35,7 @@ from experimaestro.tui.widgets.jobs import (
     TreeGroupData,
     TreeJobData,
 )
+from experimaestro.tui.widgets.actions import PastRunActionConfirmScreen
 from experimaestro.tui.widgets.services import ServicesList
 from experimaestro.tui.widgets.stray_jobs import (
     OrphanJobsPanel,
@@ -45,6 +46,7 @@ from experimaestro.tui.widgets.stray_jobs import (
 from .drivers import (
     LOG_EXTENSIONS,
     SEVERITIES,
+    ActionRun,
     JobDetail,
     Notification,
     OrphanRow,
@@ -627,6 +629,46 @@ class TuiDriver:
 
     async def stop_service(self, experiment_id: str, service_id: str) -> Notification:
         return await self._service_action(experiment_id, service_id, "ctrl+k")
+
+    # --- Actions
+
+    async def actions(
+        self, experiment_id: str, run_id: str | None = None
+    ) -> dict[str, str]:
+        await self.open_experiment(experiment_id, run_id)
+        self.app.query_one("#experiment-tabs", TabbedContent).active = "actions-tab"
+        await self.settle()
+        table = self._table("#actions-table")
+        return {
+            str(row_key.value): str(table.get_row(row_key)[1]) for row_key in table.rows
+        }
+
+    async def run_action(
+        self,
+        experiment_id: str,
+        action_id: str,
+        run_id: str | None = None,
+        *,
+        confirm: bool = True,
+    ) -> ActionRun:
+        await self.actions(experiment_id, run_id)
+        await self._select_row(self._table("#actions-table"), action_id)
+        start = len(self.app.notifications)
+        await self.pilot.press("enter")
+        await self.settle()
+        warning = None
+        if isinstance(self.app.screen, PastRunActionConfirmScreen):
+            warning = str(
+                self.app.screen.query_one("#action-confirm-warning", Static).render()
+            )
+            await self.pilot.click(
+                "#action-confirm-yes" if confirm else "#action-confirm-no"
+            )
+            await self.settle()
+        outcomes = [
+            n for n in self.app.notifications[start:] if "Loading" not in n.message
+        ]
+        return ActionRun(warning, outcomes[-1].severity if outcomes else None)
 
     async def connection_state(self) -> str | None:
         await self.settle()

@@ -335,6 +335,45 @@ KillConfirmScreen {
     margin: 0 1;
 }
 
+/* Confirmation of the action of a former run (widgets/actions.py) */
+PastRunActionConfirmScreen {
+    align: center middle;
+}
+
+#action-confirm-dialog {
+    width: 80;
+    height: auto;
+    border: thick $warning;
+    background: $surface;
+    padding: 1 2;
+}
+
+#action-confirm-title {
+    text-align: center;
+    text-style: bold;
+    color: $warning;
+    margin-bottom: 1;
+}
+
+#action-confirm-message {
+    margin-bottom: 1;
+}
+
+#action-confirm-warning {
+    color: $error;
+    margin-bottom: 1;
+}
+
+#action-confirm-buttons {
+    width: 100%;
+    height: auto;
+    align: center middle;
+}
+
+#action-confirm-buttons Button {
+    margin: 0 1;
+}
+
 /* Orphan jobs panel (stray_jobs.py) */
 #orphan-table {
     height: 1fr;

@@ -383,16 +383,24 @@ class Client {
     this.send("warning.action", { warningKey, actionKey, experimentId, runId });
   }
 
-  request_actions(experimentId?: string): void {
-    this.send("actions", experimentId ? { experimentId } : {});
+  // Actions of an experiment run (its current run by default), or of the
+  // current runs of all the experiments
+  request_actions(experimentId: string | null, runId: string | null): void {
+    const payload: any = {};
+    if (experimentId) payload.experimentId = experimentId;
+    if (experimentId && runId) payload.runId = runId;
+    this.send("actions", payload);
   }
 
   action_execute(
     actionId: string,
     experimentId: string,
+    runId: string,
     inputs: { [key: string]: string },
   ): void {
-    this.send("action.execute", { actionId, experimentId, inputs });
+    const payload: any = { actionId, experimentId, inputs };
+    if (runId) payload.runId = runId;
+    this.send("action.execute", payload);
   }
 
   request_orphans(): void {
