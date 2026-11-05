@@ -26,6 +26,7 @@ from experimaestro.scheduler.interfaces import (
     ExperimentJobInformation,
     ExperimentStatus,
     JobFailureStatus,
+    JobState,
     JobStateError,
     STATE_NAME_TO_JOBSTATE,
 )
@@ -40,6 +41,7 @@ from experimaestro.scheduler.state_status import (
     event_run_id,
     EventBase,
     JobEventBase,
+    JobStateChangedEvent,
     ExperimentEventBase,
     ExperimentUpdatedEvent,
     RunUpdatedEvent,
@@ -1181,13 +1183,39 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             )
                         except (KeyError, ValueError):
                             pass
+                    reset = None
                     with self._job_cache_lock:
                         job = self._job_cache.get(job_cache_key)
                         if job is not None:
                             job._experiment_status = new_state
+                            if new_state == JobState.SCHEDULED:
+                                reset = self._reload_restarted_job(job)
+                    if reset is not None:
+                        self._notify_state_listeners(reset)
 
         if isinstance(event, ExperimentEventBase):
             self._update_cached_queries(event)
+
+    @staticmethod
+    def _reload_restarted_job(job: MockJob) -> JobStateChangedEvent | None:
+        """Reload a finished job that the scheduler starts again
+
+        A job relaunched by a new run (e.g. after it failed) has its markers
+        removed and its status rewritten when it is scheduled, but no job
+        event says so (those of the previous run were consolidated): the
+        cached job would keep its final state, which wins over the scheduler
+        state when shown. Returns the state change to notify, if any.
+        """
+        if job.path is None or not job.state.finished():
+            return None
+        old_state = job.state
+        job.load_from_disk()
+        if job.state == old_state:
+            return None
+        logger.debug("Restarted job %s: %s -> %s", job, old_state, job.state)
+        return JobStateChangedEvent(
+            job_id=job.identifier, task_id=job.task_id, state=job.state.name
+        )
 
     def _load_carbon_metrics_for_job(self, job_id: str) -> CarbonMetricsData | None:
         """Load carbon metrics from carbon storage for a job.

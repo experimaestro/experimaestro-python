@@ -546,6 +546,19 @@ class Scheduler(StateProvider, threading.Thread):
                 other._process = None
                 if other.pidpath.is_file():
                     other.pidpath.unlink()
+                # The job runs again after the dependencies of this submission
+                # (they may differ from those of the previous one)
+                for dependency in job.dependencies:
+                    if any(
+                        type(known) is type(dependency)
+                        and known.origin is dependency.origin
+                        for known in other.dependencies
+                    ):
+                        continue
+                    dependency.target = other
+                    other.dependencies.add(dependency)
+                    if dependency.origin is not None:
+                        dependency.origin.dependents.add(dependency)
                 # Use set_state to handle experiment statistics updates
                 other.set_scheduler_state(JobState.WAITING)
                 other.begin_run()
@@ -553,6 +566,11 @@ class Scheduler(StateProvider, threading.Thread):
                 # The calling aio_submit will continue with this job and start it
             else:
                 logger.warning("Job %s already submitted", job.identifier)
+                # The run submitting it again (e.g. an experiment relaunched in
+                # the same process) records its state: a done job counts as
+                # finished there (written once per run, see notify_job_state)
+                if not other.scheduler_state.is_unscheduled():
+                    self.notify_job_state(other)
 
             # Watched outputs, callbacks... of this submission
             for hook in self.hooks:

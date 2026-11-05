@@ -370,12 +370,37 @@ class StateProvider(ABC):
         if exp_state is None:
             return exec_state, None
 
+        if StateProvider._is_previous_result(job, experiment, exp_state):
+            return exp_state, None
+
         resolved = exp_state.resolve(exec_state)
         if resolved is not None:
             return resolved, None
 
         # Conflict: resolve() returned None
         return exec_state, exp_state
+
+    @staticmethod
+    def _is_previous_result(
+        job: BaseJob, experiment: BaseExperiment, exp_state: JobState
+    ) -> bool:
+        """Whether the final state of a job comes from before its run
+
+        A job that the run starts again (e.g. after a failure) is waiting,
+        ready or scheduled there, while the outcome of its previous execution
+        (markers, status) is only reset when it starts: the run state is then
+        the one to show. A final state reached after the run submitted the job
+        is not stale (the run state may only lag behind).
+        """
+        if exp_state not in (JobState.WAITING, JobState.READY, JobState.SCHEDULED):
+            return False
+        if not job.state.finished() or job.endtime is None:
+            return False
+        job_infos = getattr(experiment, "job_infos", None) or {}
+        info = job_infos.get(job.identifier)
+        if info is None or info.timestamp is None:
+            return False
+        return job.endtime.timestamp() < info.timestamp
 
     def get_run_objects(
         self,

@@ -70,6 +70,8 @@ JOBID="$$"
 (
     export PATH="${CURDIR}/bin:$PATH"
     export SLURM_JOB_ID="$JOBID"
+    # Jobs stay pending while the hold file exists
+    while test -f "$XPM_SLURM_DIR/hold"; do sleep 0.05; done
     eval "$@" "${args[@]}"
     echo $? > "$XPM_SLURM_DIR/jobs/$JOBID.status"
 ) > $stdout 2> $stderr &
