@@ -125,6 +125,83 @@ experiment — the quickest way to debug an inheritance or override problem:
 experimaestro run --show -c learning_rate=1e-5 --pre-yaml base.yaml experiment.yaml
 ```
 
+## Specifications from configurations
+
+Rather than copying the parameters of a {py:class}`~experimaestro.Config` into
+your specification, use {py:class}`~experimaestro.experiments.ConfigSpec`:
+
+```python
+from experimaestro.experiments import (
+    ConfigSpec,
+    ExperimentSpecification,
+    spec_field,
+    specification,
+)
+
+from .model import Encoder, Model
+
+
+@specification
+class Specification(ExperimentSpecification):
+    model: ConfigSpec[Model]
+    encoder: ConfigSpec[Encoder] = spec_field(defaults={"size": 128}, grid=["size"])
+
+
+def run(helper, spec: Specification):
+    encoder = spec.encoder.to_config()
+    model = spec.model.to_config(encoder=encoder)
+```
+
+```yaml
+id: my-experiment
+model:
+  hidden_dim: 256
+  dropout: 0.2
+encoder:
+  size: [64, 128]
+```
+
+`ConfigSpec[Model]` has one field per parameter of `Model` whose value can be
+read from YAML (numbers, strings, booleans, paths, enums, and lists, sets,
+tuples and dictionaries of those), with the same type, documentation and
+default (required parameters default to `MISSING`). Parameters whose value is
+or contains a configuration, constants and generated values (e.g. paths created
+by a `PathGenerator`) are left out: give them to `to_config(**extra)`, which
+builds `Model.C(...)` from the specification values, `extra` replacing them.
+Values go through the configuration's own validation, so the identifier is the
+same as when building the configuration by hand. A `ConfigSpec` field defaults
+to the specification with all its default values.
+
+The fields can be changed with these options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `meta` | `False` | Also include the `Meta` parameters |
+| `include` | `None` | Only include these parameters |
+| `exclude` | `None` | Do not include these parameters |
+| `defaults` | `None` | Default values of parameters (`{"lr": 1e-4}`) |
+| `grid` | `None` | Parameters accepting a grid search (their type is `GridSearch[T]`) |
+
+They are given either to `spec_field(...)` (other keyword arguments go to
+`attr.field`), or as class keyword arguments of a subclass, which can also
+declare fields (replacing the generated ones, or new fields that are not given
+to the configuration) and methods:
+
+```python
+class ModelSpec(ConfigSpec[Model], meta=True, exclude=["dropout"]):
+    hidden_dim: GridSearch[int] = 128
+
+
+@specification
+class Specification(ExperimentSpecification):
+    model: ModelSpec
+    small_model: ModelSpec = spec_field(defaults={"hidden_dim": 16})
+```
+
+Options are inherited by subclasses, which can add fields but not remove them
+(`exclude` or `include` of an inherited field is an error). Grid searches must
+be expanded with `generate_grid` before calling `to_config`.
+
 ## Pre-experiment setup
 
 `pre_experiment` runs Python code **before** the experiment module is imported,

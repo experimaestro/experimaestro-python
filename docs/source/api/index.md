@@ -452,6 +452,17 @@ Type annotations are used to declare parameters in configurations and tasks.
 .. autofunction:: experimaestro.experiments.specification
 ```
 
+### ConfigSpec
+
+```{eval-rst}
+.. autoclass:: experimaestro.experiments.ConfigSpec
+   :members: to_config
+```
+
+```{eval-rst}
+.. autofunction:: experimaestro.experiments.spec_field
+```
+
 `ConfigurationBase` and `configuration` are deprecated aliases of
 `ExperimentSpecification` and `specification`.
 

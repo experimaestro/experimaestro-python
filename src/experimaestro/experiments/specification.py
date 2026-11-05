@@ -1,3 +1,4 @@
+import sys
 from enum import Enum
 from typing import Any
 import attr
@@ -33,14 +34,25 @@ class DirtyGitAction(str, Enum):
 
 
 @dataclass_transform(kw_only_default=True)
-def specification(*args, **kwargs):
+def specification(maybe_cls=None, /, **kwargs):
     """Defines an experiment specification class
 
     The class holds the parameters of an experiment, read from its YAML files
     (and the command line). Specifications are keyword-only attrs classes.
+    Fields whose type is a :class:`~experimaestro.experiments.ConfigSpec`
+    default to an instance of it, and can be declared with
+    :func:`~experimaestro.experiments.spec_field`.
     """
 
-    return attr.define(*args, kw_only=True, slots=False, hash=True, eq=True, **kwargs)
+    def wrap(cls):
+        # ConfigSpec classes exist only if their module was imported
+        if (
+            configspec := sys.modules.get("experimaestro.experiments.configspec")
+        ) is not None:
+            configspec.resolve_spec_fields(cls)
+        return attr.define(cls, kw_only=True, slots=False, hash=True, eq=True, **kwargs)
+
+    return wrap if maybe_cls is None else wrap(maybe_cls)
 
 
 @specification()

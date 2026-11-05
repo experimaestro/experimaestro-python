@@ -194,6 +194,17 @@ def get_nested_attr_type(obj: Any, path: str) -> Any:
             f"(at level {'.'.join(keys[:-1]) if len(keys) > 1 else 'root'})"
         )
 
+    # attrs fields know their type even when the class has no annotation for
+    # them (e.g. the fields of ConfigSpec classes)
+    if attr.has(type(current_obj)):
+        field = attr.fields_dict(type(current_obj)).get(last_key)
+        if (
+            field is not None
+            and field.type is not None
+            and not isinstance(field.type, str)
+        ):
+            return field.type
+
     try:
         type_hints = get_type_hints(type(current_obj))
         return type_hints.get(last_key, Any)
