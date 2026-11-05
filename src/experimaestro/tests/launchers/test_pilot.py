@@ -70,6 +70,10 @@ class Write(Task):
     out: Meta[Path] = field(default_factory=PathGenerator("out.txt"))
 
     def execute(self):
+        import sys
+
+        print(f"stdout of {self.value}")  # noqa: T201
+        print(f"stderr of {self.value}", file=sys.stderr)  # noqa: T201
         self.out.write_text(str(self.value))
 
 
@@ -105,6 +109,12 @@ def test_pilot_runs_several_jobs(tmp_path: Path):
         job = job_of(add)
         assert job.wait() == JobState.DONE
         assert add.out.read_text() == "3"
+
+        # The job outputs go to the usual files of each job
+        for ix, write in enumerate(writes):
+            write_job = job_of(write)
+            assert f"stdout of {ix}" in write_job.stdout.read_text()
+            assert f"stderr of {ix}" in write_job.stderr.read_text()
 
     (pool,) = pool_dirs(workdir)
     assert len(pilots(pool)) == 1
