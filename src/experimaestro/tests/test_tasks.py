@@ -127,7 +127,7 @@ def test_fail_dep(caplog):
 
     assert xp.failed
     # The dependent job is not run, rather than failed
-    assert xp.failed_jobs() == ([fail.__xpm__.job], [dep.__xpm__.job])
+    assert xp.failed_jobs_by_reason() == ([fail.__xpm__.job], [dep.__xpm__.job])
     assert xp.failure_summary() == (
         "1 failed job (and 1 job not run because of a failed dependency)"
     )
@@ -638,3 +638,15 @@ def test_wait_blocks_until_all_jobs_finished():
             assert state == JobState.DONE, (
                 f"Task {i} has state {state} after xp.wait(), expected DONE"
             )
+
+
+def test_experiment_failed_jobs_count():
+    """The live experiment keeps the ``failed_jobs`` count of the interface
+    (used by the web UI and the remote server)"""
+    from experimaestro.scheduler.experiment import experiment
+    from experimaestro.scheduler.interfaces import BaseExperiment
+
+    assert (
+        isinstance(BaseExperiment.__dict__["failed_jobs"], property)
+        and "failed_jobs" not in experiment.__dict__
+    )
