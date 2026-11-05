@@ -892,6 +892,7 @@ class TestServerRequestHandling:
             cpu_percent=12.5,
             memory_mb=128.0,
             num_threads=4,
+            detail="running in pilot SLURM job 12",
         )
 
         result = server_with_mock._handle_get_process_info(
@@ -905,6 +906,7 @@ class TestServerRequestHandling:
             "cpu_percent": 12.5,
             "memory_mb": 128.0,
             "num_threads": 4,
+            "detail": "running in pilot SLURM job 12",
         }
 
     def test_handle_get_process_info_missing_task_id(self, server_with_mock):

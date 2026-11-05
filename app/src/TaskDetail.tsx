@@ -163,6 +163,7 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
                 {proc.cpuPercent != null ? `, CPU ${proc.cpuPercent.toFixed(1)}%` : ""}
                 {proc.memoryMb != null ? `, ${proc.memoryMb.toFixed(0)} MB` : ""}
                 {proc.numThreads != null ? `, ${proc.numThreads} threads` : ""}
+                {proc.detail ? ` — ${proc.detail}` : ""}
               </div>
             </>
           )}

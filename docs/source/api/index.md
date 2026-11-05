@@ -333,6 +333,13 @@ Type annotations are used to declare parameters in configurations and tasks.
    :members:
 ```
 
+### PilotOptions (beta)
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.slurm.PilotOptions
+   :members:
+```
+
 ## Connectors
 
 ### LocalConnector

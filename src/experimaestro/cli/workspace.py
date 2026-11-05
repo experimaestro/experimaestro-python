@@ -142,6 +142,58 @@ def orphans(cfg: RunConfig, clean: bool, size: bool, include_folders: bool):
     _orphans(cfg.workspace.path, clean, size, include_folders)
 
 
+@click.option("--all", "show_all", is_flag=True, help="Also show stopped pilots")
+@click.option(
+    "--stop",
+    is_flag=True,
+    help="Ask the pilots to stop taking jobs (running jobs are not stopped)",
+)
+@workspace.command(cls=RemoteCommand)
+@click.pass_obj
+def pilots(cfg: RunConfig, show_all: bool, stop: bool):
+    """SLURM pilot allocations (beta): pilots and the jobs waiting for one"""
+    from datetime import datetime
+
+    from experimaestro.launchers.slurm.pilot import list_pilots, stop_pilots
+
+    path = cfg.workspace.path
+    if stop:
+        for pilot in stop_pilots(path):
+            print(f"Asked pilot {pilot.id} (SLURM job {pilot.slurm_id}) to stop")
+        return
+
+    pilots, queued = list_pilots(path)
+    colors = {"running": "green", "idle": "yellow", "pending": "cyan"}
+    shown = [p for p in pilots if show_all or p.status not in ("stopped", "ended")]
+    if not shown and not queued:
+        cprint("No pilot", "yellow")
+        return
+
+    jobspath = path / "jobs"
+    for pilot in shown:
+        line = (
+            f"{colored(f'{pilot.status:9}', colors.get(pilot.status, 'red'))}"
+            f" pilot {pilot.id} (SLURM job {pilot.slurm_id}, pool {pilot.pool})"
+        )
+        if pilot.end is not None and pilot.status not in ("stopped", "ended"):
+            line += f", until {datetime.fromtimestamp(pilot.end):%Y-%m-%d %H:%M}"
+        if pilot.job:
+            line += f"\n          running {_relative(Path(pilot.job), jobspath)}"
+        print(line)
+    for job in queued:
+        print(
+            f"{colored('waiting  ', 'cyan')} {_relative(Path(job.job), jobspath)}"
+            f" ({job.time}s, pool {job.pool})"
+        )
+
+
+def _relative(path: Path, base: Path) -> str:
+    try:
+        return str(path.relative_to(base))
+    except ValueError:
+        return str(path)
+
+
 @click.option("--clean", is_flag=True, help="Prune the orphan folders")
 @click.option("--size", is_flag=True, help="Show size of each folder")
 @click.option(

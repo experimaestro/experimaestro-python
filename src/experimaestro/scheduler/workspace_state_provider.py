@@ -2301,6 +2301,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         Returns a ProcessInfo dataclass or None if not available.
         """
+        from experimaestro.connectors import Process
+
         if not job.path or not job.task_id:
             return None
 
@@ -2319,7 +2321,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
             if pid is None:
                 return None
 
-            result = ProcessInfo(pid=pid, type=proc_type, running=False)
+            result = ProcessInfo(
+                pid=pid,
+                type=proc_type,
+                running=False,
+                detail=Process.describe_definition(pinfo),
+            )
 
             # Try to get more info for running jobs using the process abstraction
             if job.state and job.state.running():

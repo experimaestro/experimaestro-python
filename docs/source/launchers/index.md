@@ -52,6 +52,110 @@ with experiment(launcher=launcher):
 
 {py:class}`~experimaestro.launchers.slurm.SlurmLauncher` - Launcher that submits tasks to the SLURM workload manager.
 
+(slurm-pilots)=
+#### Pilot allocations (beta)
+
+```{warning}
+This feature is in beta: the options and the files it writes may change.
+```
+
+```{important}
+Pilots are coordinated through files in the `pilots/` folder of the workspace:
+the workspace must be on a file system **shared by the submission host and the
+compute nodes** (e.g. NFS or Lustre), and the experiment must submit to SLURM
+from a cluster host (local connector, not an SSH connector). The pilots run the
+same Python interpreter as the experiment (`XPM_PILOT_PYTHON` overrides it),
+which must thus be reachable from the compute nodes.
+```
+
+When many short jobs request the same resources, waiting in the SLURM queue
+for each of them can take longer than running them. With the `pilot` option, a
+SLURM launcher submits *pilot* jobs instead: each pilot holds an allocation for
+up to `time` and runs queued jobs one after another, until not enough time is
+left or it has nothing to do (see *Stopping* below).
+
+```python
+from experimaestro.launchers.slurm import PilotOptions, SlurmLauncher, SlurmOptions
+
+launcher = SlurmLauncher(
+    options=SlurmOptions(partition="gpu", gpus_per_node=1, time="1:00:00"),
+    pilot=PilotOptions(time="20:00:00", idle_timeout=600, max_pilots=4),
+)
+```
+
+- **Job duration**: the `time` SLURM option of the job's launcher is its time
+  limit. A pilot only takes a job if it can finish in time (plus a `margin`), and
+  stops the job (`SIGTERM`, then `SIGKILL` after `kill_wait` seconds) when the
+  time limit is reached: the job then fails with a *timeout*, so a
+  {ref}`resumable task <resumable-tasks>` is retried and
+  {py:meth}`~experimaestro.ResumableTask.remaining_time` gives the time left
+  before the job's own time limit (or the pilot's end, if earlier).
+- **Pools**: the pilots that can run a job form a *pool*, stored in the
+  `pilots/<pool>` folder of the workspace. `<pool>` is the first 16 hexadecimal
+  digits of a SHA-256 hash of:
+
+  - the path of the SLURM commands (`binpath` of the launcher),
+  - the SLURM options *except* `time` (options that are not set are left out),
+  - all the {py:class}`~experimaestro.launchers.slurm.PilotOptions` (`time`,
+    `idle_timeout`, `max_pilots`, `margin`, `kill_wait`, `poll_interval`,
+    `linger`).
+
+  Two launchers that only differ by `time` (e.g. built by `launchers.py` for
+  requirements with different durations) thus share a pool, while changing any
+  other SLURM or pilot option gives a different pool. The output of a pilot is
+  in `pilots/<pool>/pilots/<pilot>.{out,err}`.
+- **Sharing between experiments**: a pool belongs to a workspace, not to an
+  experiment. Experiments running in the same workspace with the same options
+  use the same pool, and any of its pilots can run any of their jobs (whichever
+  experiment submitted them, and whichever submitted the pilot). Experiments in
+  different workspaces never share pilots. Jobs without a `time` option, or
+  longer than a pilot (`time` + `margin` above the pilot `time`), do not use
+  pilots and are submitted with `sbatch` as usual.
+- **Starting pilots**: experiments waiting for jobs of a pool check it every
+  `poll_interval` seconds. The waiting jobs are matched (longest first) with the
+  pilots that can take a job: pilots still pending in the SLURM queue (they will
+  have their full `time`) and idle running pilots whose remaining time covers
+  the job's `time` plus `margin`. A new pilot is submitted for each job left
+  without one, so a job that does not fit in what remains of a running pilot
+  gets a new pilot, and so do jobs that become ready while all pilots are busy.
+  `max_pilots` caps the number of pilots of the pool (pending or running): above
+  it, jobs wait until a pilot is free — or stops, in which case a new one is
+  submitted. A pilot takes the oldest waiting job that fits in its remaining
+  time, by exclusively creating a claim file with a hard link (reliable on NFS),
+  so that a job is run only once even when several pilots look at the queue.
+- **Stopping**: an idle pilot stops after `idle_timeout` seconds, or `linger`
+  seconds (1 minute by default) after no experiment has jobs in its pool (each
+  experiment renews a lease while it has jobs queued or running in the pool), so
+  that allocations are released soon after the experiments end.
+  `experimaestro workspace pilots --stop` asks all the pilots to stop taking jobs.
+- **Failures**: a job is marked as failed if its pilot ends while running it
+  (e.g. the pilot is cancelled, or a node fails); a timeout of the pilot is
+  reported as a timeout of the job. Killing a job only stops this job, not the
+  pilot.
+
+In `launchers.py`, the policy is plain Python, e.g. to only pack short jobs:
+
+```python
+PILOT = PilotOptions(time="20:00:00")
+
+
+def find_launcher(requirements: HostRequirement, tags=set()):
+    if match := requirements.match(HostSpecification(...)):
+        duration = match.requirement.duration
+        return SlurmLauncher(
+            options=SlurmOptions(time=SlurmOptions.format_time(duration)),
+            pilot=PILOT if duration <= 4 * 3600 else None,
+        )
+```
+
+The job details (TUI and web UI) show where a job runs (e.g. *running in
+pilot SLURM job 1234 on node12, time limit at 2026-11-05 14:00*) or that it
+waits for a pilot, and `experimaestro workspace pilots` lists the pilots of a
+workspace (pending, running with their current job, idle) and the waiting jobs
+(`--all` also shows the stopped pilots).
+
+{py:class}`~experimaestro.launchers.slurm.PilotOptions` - Options of the pilot allocations.
+
 (dynamic)=
 ### Dynamic Launcher
 

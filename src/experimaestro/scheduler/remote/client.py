@@ -1739,6 +1739,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             cpu_percent=result.get("cpu_percent"),
             memory_mb=result.get("memory_mb"),
             num_threads=result.get("num_threads"),
+            detail=result.get("detail"),
         )
 
     def get_failure_details(self, job: BaseJob):

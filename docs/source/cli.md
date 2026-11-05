@@ -453,6 +453,18 @@ experimaestro workspace orphans [--size] [--clean] [--no-folders]
 experimaestro workspace stray [--size] [--kill] [--delete] [--perform]
 ```
 
+### SLURM pilots (beta)
+
+```bash
+# Pilot allocations of the workspace and the jobs waiting for one
+experimaestro workspace pilots [--all]
+
+# Ask the pilots to stop taking jobs (running jobs are not stopped)
+experimaestro workspace pilots --stop
+```
+
+See {ref}`slurm-pilots`.
+
 ### Migrating from experimaestro 1.x
 
 ```bash

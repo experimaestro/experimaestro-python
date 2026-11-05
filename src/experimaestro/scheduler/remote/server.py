@@ -570,6 +570,7 @@ class SSHStateProviderServer:
             "cpu_percent": pinfo.cpu_percent,
             "memory_mb": pinfo.memory_mb,
             "num_threads": pinfo.num_threads,
+            "detail": pinfo.detail,
         }
 
     def _handle_get_failure_details(self, params: dict) -> dict | None:

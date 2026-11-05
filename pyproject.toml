@@ -102,6 +102,7 @@ experimaestro = "experimaestro.__main__:main"
 [project.entry-points."experimaestro.process"]
 local = "experimaestro.connectors.local:LocalProcess"
 slurm = "experimaestro.launchers.slurm:BatchSlurmProcess"
+slurm-pilot = "experimaestro.launchers.slurm.pilot:PilotProcess"
 
 [project.entry-points."experimaestro.connectors"]
 local = "experimaestro.connectors.local:LocalConnector"

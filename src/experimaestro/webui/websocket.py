@@ -98,6 +98,7 @@ def _process_to_frontend(process: dict[str, Any] | None) -> dict[str, Any] | Non
         "cpuPercent": process.get("cpu_percent"),
         "memoryMb": process.get("memory_mb"),
         "numThreads": process.get("num_threads"),
+        "detail": process.get("detail"),
     }
 
 
@@ -180,6 +181,7 @@ def serialize_job(
             "cpu_percent": process_info.cpu_percent,
             "memory_mb": process_info.memory_mb,
             "num_threads": process_info.num_threads,
+            "detail": process_info.detail,
         }
 
     payload = _job_dict_to_frontend(d)

@@ -17,6 +17,7 @@ from experimaestro.utils import ThreadingCondition
 from functools import cached_property
 from experimaestro.launchers import Launcher
 from experimaestro.scriptbuilder import PythonScriptBuilder
+from .pilot import DEADLINE_ENV, PilotOptions, start_in_pilot
 from experimaestro.connectors import (
     Connector,
     OutputCaptureHandler,
@@ -47,7 +48,9 @@ class SlurmLauncherInformation:
         """Returns the remaining time in seconds before the SLURM job times out.
 
         Uses the SLURM_JOB_ID environment variable to query squeue for the
-        remaining time. The job end time is cached on first call.
+        remaining time; a job run by a pilot allocation also has its own
+        deadline (``XPM_JOB_DEADLINE``), the earliest end is used. The job end
+        time is cached on first call.
 
         Returns:
             The remaining time in seconds, or None if no time limit.
@@ -62,19 +65,34 @@ class SlurmLauncherInformation:
             remaining = _slurm_job_end_time - time.time()
             return max(0.0, remaining)
 
+        # A job run by a pilot has its own deadline
+        deadline: float | None = None
+        if value := os.environ.get(DEADLINE_ENV):
+            deadline = float(value)
+
         # Query SLURM for remaining time and compute end time
         job_id = os.environ.get("SLURM_JOB_ID")
-        if not job_id:
+        remaining_seconds = None
+        if job_id:
+            remaining_seconds = self._query_remaining_time(job_id)
+        else:
             logger.debug("No SLURM_JOB_ID in environment, cannot get remaining time")
-            return None
 
-        remaining_seconds = self._query_remaining_time(job_id)
-        if remaining_seconds is None:
+        now = time.time()
+        ends = [
+            end
+            for end in (
+                deadline,
+                now + remaining_seconds if remaining_seconds is not None else None,
+            )
+            if end is not None
+        ]
+        if not ends:
             return None
 
         # Cache the absolute end time
-        _slurm_job_end_time = time.time() + remaining_seconds
-        return remaining_seconds
+        _slurm_job_end_time = min(ends)
+        return max(0.0, _slurm_job_end_time - now)
 
     def _query_remaining_time(self, job_id: str) -> float | None:
         """Query SLURM for remaining time of a job."""
@@ -748,7 +766,7 @@ class SlurmProcessBuilder(ProcessBuilder):
         # even in test mode, since sbatch is the normal submission path
         self.detach = True
 
-    def start(self, task_mode: bool = False) -> BatchSlurmProcess:
+    def start(self, task_mode: bool = False) -> Process:
         """Start the process"""
         builder = self.launcher.connector.processbuilder()
         builder.environ = self.launcher.launcherenv
@@ -766,6 +784,17 @@ class SlurmProcessBuilder(ProcessBuilder):
             builder.environ = self.environ
             builder.detach = False
             return builder.start()
+
+        if task_mode and self.launcher.pilot is not None:
+            process = start_in_pilot(
+                self.launcher,
+                [str(c) for c in self.command],
+                workspace=self.workingDirectory,
+                stdout=self.stdout,
+                stderr=self.stderr,
+            )
+            if process is not None:
+                return process
 
         builder.command = [f"{self.launcher.binpath}/sbatch", "--parsable"]
 
@@ -884,6 +913,10 @@ class SlurmOptions:
         return f"{hours}:{minutes}:{seconds}"
 
 
+#: Marks an unchanged argument
+_KEEP: Any = object()
+
+
 class SlurmLauncher(Launcher):
     """Slurm workload manager launcher
 
@@ -899,20 +932,24 @@ class SlurmLauncher(Launcher):
         main=None,
         launcherenv: dict[str, str] = None,
         binpath="/usr/bin",
+        pilot: PilotOptions | None = None,
     ):
         """
         Arguments:
             main: Main slurm launcher to avoid launching too many polling jobs
             interval: seconds between polling job statuses
+            pilot: run the jobs in pilot allocations (beta)
         """
         super().__init__(connector or LocalConnector.instance())
         self.binpath = Path(binpath)
         self.interval = interval
         self.launcherenv = launcherenv
         self.options = options or SlurmOptions()
+        self.pilot = pilot
 
     def __str__(self):
-        return f"SlurmLauncher({self.options}, path={self.binpath})"
+        pilot = f", pilot={self.pilot}" if self.pilot else ""
+        return f"SlurmLauncher({self.options}, path={self.binpath}{pilot})"
 
     @staticmethod
     def get_cli():
@@ -928,14 +965,20 @@ class SlurmLauncher(Launcher):
             ("interval", self.interval),
         )
 
-    def config(self, **kwargs):
-        """Returns a new Slurm launcher with the given configuration"""
+    def config(self, *, pilot: Any = _KEEP, **kwargs):
+        """Returns a new Slurm launcher with the given configuration
+
+        :param pilot: the pilot options (``None`` to submit each job with
+            sbatch); unchanged if not given
+        :param kwargs: SLURM options (see :class:`SlurmOptions`)
+        """
         return SlurmLauncher(
             connector=self.connector,
             binpath=self.binpath,
             launcherenv=self.launcherenv,
             options=self.options.merge(SlurmOptions(**kwargs)),
             interval=self.interval,
+            pilot=self.pilot if pilot is _KEEP else pilot,
         )
 
     def scriptbuilder(self):

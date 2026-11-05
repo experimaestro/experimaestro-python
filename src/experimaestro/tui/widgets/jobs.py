@@ -357,6 +357,9 @@ class JobDetailView(Widget):
         elif job.state and job.state.running():
             parts.append("[dim](process not found)[/dim]")
 
+        if pinfo.detail:
+            parts.append(escape_markup(pinfo.detail))
+
         return " | ".join(parts)
 
     def _get_carbon_info(self, job) -> str:

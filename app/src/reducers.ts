@@ -57,6 +57,8 @@ export type ProcessInfo = {
   cpuPercent?: number | null;
   memoryMb?: number | null;
   numThreads?: number | null;
+  /** Details given by the process type (e.g. the pilot running a job) */
+  detail?: string | null;
 };
 
 // Known job statuses; the backend may also send scheduler states (e.g.

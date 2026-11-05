@@ -86,6 +86,9 @@ class ProcessInfo:
     num_threads: int | None = None
     """Number of threads (if available)"""
 
+    detail: str | None = None
+    """Details given by the process type (e.g. the pilot running a job)"""
+
 
 # Type alias for listener callbacks (uses EventBase from state_status)
 StateListener = Callable[[EventBase], None]

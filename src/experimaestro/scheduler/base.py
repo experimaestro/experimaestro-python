@@ -2022,6 +2022,7 @@ class Scheduler(StateProvider, threading.Thread):
         For the scheduler, we can access the actual Job and read its PID file.
         """
         from experimaestro.scheduler.state_provider import ProcessInfo
+        from experimaestro.connectors import Process as ProcessHandler
 
         # Get the actual Job from our jobs dict
         actual_job = self.jobs.get(job.identifier)
@@ -2044,7 +2045,12 @@ class Scheduler(StateProvider, threading.Thread):
             # Check if running based on scheduler state
             running = actual_job.scheduler_state == JobState.RUNNING
 
-            return ProcessInfo(pid=pid, type=proc_type, running=running)
+            return ProcessInfo(
+                pid=pid,
+                type=proc_type,
+                running=running,
+                detail=ProcessHandler.describe_definition(pinfo),
+            )
         except Exception:
             return None
 

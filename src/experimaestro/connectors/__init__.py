@@ -131,6 +131,25 @@ class Process:
         """Outputs a process specification"""
         raise NotImplementedError(f"tospec for {self.__class__}")
 
+    @classmethod
+    def describe(cls, definition: dict[str, Any]) -> str | None:
+        """Details about the process shown by the UIs (e.g. where it runs),
+        computed from its specification without querying the launcher"""
+        return None
+
+    @staticmethod
+    def describe_definition(definition: dict[str, Any]) -> str | None:
+        """Details about a process from its specification (see
+        :meth:`describe`), or None if there are none"""
+        handler = Process.handler(definition.get("type", ""))
+        if handler is None:
+            return None
+        try:
+            return handler.describe(definition)
+        except Exception:
+            logging.debug("Could not describe process %s", definition, exc_info=True)
+            return None
+
     @staticmethod
     def fromDefinition(connector: "Connector", definition: dict[str, Any]) -> "Process":
         """Retrieves a process from a serialized definition"""
