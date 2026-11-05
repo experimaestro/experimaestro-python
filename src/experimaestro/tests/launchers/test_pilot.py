@@ -16,6 +16,7 @@ from experimaestro.launchers.slurm import base as slurm_base
 from experimaestro.launchers.slurm.base import SlurmLauncherInformation
 from experimaestro.launchers.slurm.pilot import (
     DEADLINE_ENV,
+    PilotPool,
     PilotProcess,
     PoolDirectory,
     Worker,
@@ -316,6 +317,43 @@ def test_pilot_claim_exclusive(tmp_path: Path):
     assert second is None
     assert json.loads(d.claim_path("job").read_text())["pilot"] == "p0"
     assert d.pending() == []
+
+
+def test_pilot_claim_while_checking_capacity(tmp_path: Path, monkeypatch):
+    """No pilot is submitted for a job that the only pilot claims while the
+    scheduler checks whether pilots are missing"""
+    pool = PilotPool(make_launcher(tmp_path), tmp_path / "pool")
+    d = pool.directory
+    (d.queue / "job.json").write_text(json.dumps({"time": 10, "cwd": "/"}))
+    # A running pilot (unknown to SLURM: its state is not checked)
+    (d.pilots / "p0.json").write_text(json.dumps({"slurm_id": None}))
+    worker = Worker(
+        d.path,
+        "p0",
+        time_limit=100,
+        idle_timeout=10,
+        margin=1,
+        kill_wait=1,
+        poll_interval=1,
+        linger=10,
+    )
+    worker.write_state(None)
+
+    # The pilot takes the job while the scheduler reads the state
+    read_pilots = pool._pilots
+
+    def claim_then_read_pilots():
+        claimed = worker.claim()
+        assert claimed is not None
+        worker.write_state(claimed[0])
+        return read_pilots()
+
+    monkeypatch.setattr(pool, "_pilots", claim_then_read_pilots)
+    submitted = []
+    monkeypatch.setattr(pool, "submit_pilot", lambda: submitted.append(1))
+
+    pool._ensure_capacity()
+    assert submitted == []
 
 
 def test_process_detail_web():

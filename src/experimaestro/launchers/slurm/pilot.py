@@ -411,15 +411,20 @@ class PilotPool:
         atomic_write_json(path, {"time": time.time()})
 
     def _ensure_capacity(self):
+        if not self.directory.pending():
+            return
+
+        # The pilots are read before the queue: a worker claims a job before
+        # saying it is busy with it, so a job seen as queued is never also
+        # counted as keeping a pilot busy (which would submit a useless pilot)
+        pilots = self._pilots()
+        now = time.time()
         queued = []
         for path in self.directory.pending():
             if (entry := _read_json(path)) is not None:
                 queued.append(entry)
         if not queued:
             return
-
-        now = time.time()
-        pilots = self._pilots()
 
         # Remaining time of the pilots that can take a job now (or when they
         # start, for pending ones)
