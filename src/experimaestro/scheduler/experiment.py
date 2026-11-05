@@ -823,7 +823,7 @@ class experiment(BaseExperiment):
         assert self.scheduler is not None and self.scheduler.loop is not None
         asyncio.run_coroutine_threadsafe(doStop(), self.scheduler.loop)
 
-    def failed_jobs(self) -> tuple[list[Job], list[Job]]:
+    def failed_jobs_by_reason(self) -> tuple[list[Job], list[Job]]:
         """The failed jobs of the experiment, as ``(failed, not_run)``: the
         jobs that failed, and those not run because a dependency failed"""
         from experimaestro.scheduler.jobs import JobFailureStatus
@@ -839,7 +839,7 @@ class experiment(BaseExperiment):
     def failure_summary(self) -> str:
         """Summary of the failed jobs, e.g. ``1 failed job (and 1 job not run
         because of a failed dependency)``"""
-        failed, not_run = self.failed_jobs()
+        failed, not_run = self.failed_jobs_by_reason()
         summary = f"{len(failed)} failed job{'s' if len(failed) != 1 else ''}"
         if not_run:
             summary += (
@@ -855,7 +855,7 @@ class experiment(BaseExperiment):
         if not new:
             return
         self._reported_failures |= new
-        failed, _ = self.failed_jobs()
+        failed, _ = self.failed_jobs_by_reason()
         for job in failed:
             if job.identifier in new:
                 logger.error(
