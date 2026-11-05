@@ -439,18 +439,21 @@ Type annotations are used to declare parameters in configurations and tasks.
    :members:
 ```
 
-### ConfigurationBase
+### ExperimentSpecification
 
 ```{eval-rst}
-.. autoclass:: experimaestro.experiments.ConfigurationBase
+.. autoclass:: experimaestro.experiments.ExperimentSpecification
    :members:
 ```
 
-### configuration
+### specification
 
 ```{eval-rst}
-.. autofunction:: experimaestro.experiments.configuration
+.. autofunction:: experimaestro.experiments.specification
 ```
+
+`ConfigurationBase` and `configuration` are deprecated aliases of
+`ExperimentSpecification` and `specification`.
 
 ## HuggingFace Integration
 

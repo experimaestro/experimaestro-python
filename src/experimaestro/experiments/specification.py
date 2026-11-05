@@ -1,0 +1,112 @@
+from enum import Enum
+from typing import Any
+import attr
+
+
+class MissingSentinel:
+    def __repr__(self):
+        return "MISSING"
+
+    def __bool__(self):
+        return False
+
+
+MISSING: Any = MissingSentinel()
+
+try:
+    from typing import dataclass_transform
+except ImportError:
+    from typing_extensions import dataclass_transform
+
+
+class DirtyGitAction(str, Enum):
+    """Action to take when the git repository has uncommitted changes"""
+
+    IGNORE = "ignore"
+    """Don't check or warn about dirty git state"""
+
+    WARN = "warn"
+    """Warn about dirty git state (default)"""
+
+    ERROR = "error"
+    """Raise an error if git is dirty"""
+
+
+@dataclass_transform(kw_only_default=True)
+def specification(*args, **kwargs):
+    """Defines an experiment specification class
+
+    The class holds the parameters of an experiment, read from its YAML files
+    (and the command line). Specifications are keyword-only attrs classes.
+    """
+
+    return attr.define(*args, kw_only=True, slots=False, hash=True, eq=True, **kwargs)
+
+
+@specification()
+class ExperimentSpecification:
+    """Base class of experiment specifications"""
+
+    id: str = MISSING
+    """ID of the experiment
+
+    This ID is used by experimaestro when running as the experiment.
+    """
+
+    file: str = "experiment"
+    """Relative path of the file containing a run function"""
+
+    module: str | None = None
+    """Relative path of the file containing a run function"""
+
+    pythonpath: list[str] | None = None
+    """Python path relative to the parent directory of the YAML file"""
+
+    parent: str | None = None
+    """(Deprecated) Relative path of a YAML file that should be merged.
+    Use ``imports`` instead."""
+
+    imports: list[str] | None = None
+    """List of YAML file paths to import (merged in order, current file wins)"""
+
+    pre_experiment: str | None = None
+    """Python file path or module name to execute before importing the experiment.
+
+    Can be either:
+    - A relative path to a Python file (e.g., "pre_setup.py")
+    - A Python module name (e.g., "mypackage.pre_experiment")
+
+    This is useful for setting environment variables or mocking modules to speed up
+    the experiment setup phase (e.g., mocking torch.compile or torch.nn).
+    The actual job execution will use real modules."""
+
+    title: str = ""
+    """Short description of the experiment"""
+
+    subtitle: str = ""
+    """Allows to give some more details about the experiment"""
+
+    paper: str = ""
+    """Source paper for this experiment"""
+
+    description: str = ""
+    """Description of the experiment"""
+
+    tags: list[str] | None = None
+    """Tags of the experiment (e.g. ``[eval, mice]``): the UIs can group and
+    search experiments by tag"""
+
+    add_timestamp: bool = False
+    """Adds a timestamp YYYY_MM_DD-HH_MM to the experiment ID"""
+
+    dirty_git: DirtyGitAction = DirtyGitAction.WARN
+    """Action when git repository has uncommitted changes: ignore, warn (default), error"""
+
+    grid_search: dict[str, Any] | None = None
+    """Optional grid search parameters.
+
+    A dictionary where keys are dot-separated paths to specification fields,
+    and values are either a list of values or a dictionary with 'values_list' or 'values_range'.
+    Alternatively, can contain a 'config_dicts' key with a list of dictionaries defining
+    coupled parameter combinations (all dictionaries must have identical keys).
+    """

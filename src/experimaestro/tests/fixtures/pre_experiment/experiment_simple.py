@@ -1,12 +1,16 @@
 """Simple experiment that does nothing."""
 
-from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
+from experimaestro.experiments import (
+    ExperimentHelper,
+    specification,
+    ExperimentSpecification,
+)
 
 
-@configuration()
-class Configuration(ConfigurationBase):
+@specification()
+class Specification(ExperimentSpecification):
     pass
 
 
-def run(helper: ExperimentHelper, cfg: Configuration):
+def run(helper: ExperimentHelper, spec: Specification):
     pass

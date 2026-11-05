@@ -1,25 +1,25 @@
 # Grid Search
 
-Grid search allows you to explore a range of parameters for your experiments. Experimaestro provides a unified way to define search spaces directly in your configuration classes and YAML files.
+Grid search allows you to explore a range of parameters for your experiments. Experimaestro provides a unified way to define search spaces directly in your experiment specification classes and YAML files.
 
 ## Defining Search Spaces
 
-To enable grid search for a configuration field, use the `GridSearch[T]` type hint. This allows the field to accept either a single value (of type `T`) or a search space definition.
+To enable grid search for a specification field, use the `GridSearch[T]` type hint. This allows the field to accept either a single value (of type `T`) or a search space definition.
 
 ```python
-from experimaestro.experiments import ConfigurationBase, configuration
+from experimaestro.experiments import ExperimentSpecification, specification
 from experimaestro.experiments.grid import GridSearch
 
 
-@configuration
-class MyConfig(ConfigurationBase):
+@specification
+class MySpec(ExperimentSpecification):
     learning_rate: GridSearch[float] = 0.001
     batch_size: GridSearch[int] = 32
 ```
 
 ### Inline Lists
 
-You can define a list of values directly in your YAML configuration:
+You can define a list of values directly in your YAML specification:
 
 ```yaml
 id: my-experiment
@@ -62,7 +62,7 @@ learning_rate:
 
 ## Explicit Grid Search Block
 
-Sometimes you want to define a grid search for parameters that are deeply nested or when you want to keep the search space definition separate from the main configuration values. You can use the `grid_search` block in your YAML:
+Sometimes you want to define a grid search for parameters that are deeply nested or when you want to keep the search space definition separate from the main specification values. You can use the `grid_search` block in your YAML:
 
 ```yaml
 id: my-experiment
@@ -75,7 +75,7 @@ grid_search:
   sub_config.param: [10, 20, 30]
 ```
 
-The keys in the `grid_search` block are dot-separated paths to the fields in your configuration.
+The keys in the `grid_search` block are dot-separated paths to the fields in your specification.
 
 Duplicate values (e.g. `lr: [0.1, 0.01, 0.1]`), and duplicate dictionaries in
 `config_dicts`, are ignored with a warning: only the first occurrence is used.
@@ -125,45 +125,49 @@ grid_search:
     - model: "bert-large-uncased"
       batch_size: 16
 ```
-This generates 3 x 2 = 6 configurations.
+This generates 3 x 2 = 6 specifications.
 
 ## Generating Permutations
 
 The grid search is managed manually in your `run` function. This gives you full control over how to manage experiment IDs, logging, and task submission.
 
 The `generate_grid` function returns two lists:
-1.  **`configurations`**: A list of finalized configuration objects, each representing one permutation.
+1.  **`specifications`**: A list of finalized specification objects, each representing one permutation.
 2.  **`tags`**: A list of dictionaries containing the specific parameter values that were set for each permutation.
 
 ```python
-from experimaestro.experiments import ExperimentHelper, ConfigurationBase, configuration
+from experimaestro.experiments import (
+    ExperimentHelper,
+    ExperimentSpecification,
+    specification,
+)
 from experimaestro.experiments.grid import GridSearch, generate_grid
 
 
-@configuration
-class MyConfig(ConfigurationBase):
+@specification
+class MySpec(ExperimentSpecification):
     learning_rate: GridSearch[float] = 0.001
 
 
-def run(helper: ExperimentHelper, cfg: MyConfig):
+def run(helper: ExperimentHelper, spec: MySpec):
     # Generate all permutations and their corresponding tags
-    configurations, all_tags = generate_grid(cfg)
+    specifications, all_tags = generate_grid(spec)
 
-    for config, tags in zip(configurations, all_tags):
-        # Each permutation is a finalized MyConfig object
+    for point_spec, tags in zip(specifications, all_tags):
+        # Each permutation is a finalized MySpec specification
         # 'tags' contains the specific values used (e.g., {'learning_rate': 0.1})
 
         # Use tags to create a descriptive experiment ID
         tag_suffix = ".".join(f"{k}={v}" for k, v in tags.items())
-        sub_id = f"{config.id}.{tag_suffix}" if tag_suffix else config.id
+        sub_id = f"{point_spec.id}.{tag_suffix}" if tag_suffix else point_spec.id
 
-        # Run your experiment logic for this config
+        # Run your experiment logic for this specification
         ...
 ```
 
 ## How it Works
 
 1.  **Validation**: When Experimaestro loads your YAML, the `GridSearch[T]` type hint uses a Pydantic validator to coerce the input (scalar, list, or range dict) into a `GenericParams` object.
-2.  **Discovery**: The `generate_grid` function recursively scans your configuration to find all `GenericParams` that define a search space.
+2.  **Discovery**: The `generate_grid` function recursively scans your specification to find all `GenericParams` that define a search space.
 3.  **Permutations**: It computes the Cartesian product of all discovered search spaces.
-4.  **Finalization**: For each permutation, it creates a deep copy of your configuration, injects the specific values for that permutation, and converts all `GenericParams` back to their underlying native Python types (`float`, `int`, etc.). This ensures that the rest of your code doesn't need to know about `GridSearch`.
+4.  **Finalization**: For each permutation, it creates a deep copy of your specification, injects the specific values for that permutation, and converts all `GenericParams` back to their underlying native Python types (`float`, `int`, etc.). This ensures that the rest of your code doesn't need to know about `GridSearch`.

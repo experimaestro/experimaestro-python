@@ -27,7 +27,7 @@ from experimaestro.scheduler.interfaces import (
     JobState,
 )
 from experimaestro.settings import WorkspaceSettings, get_settings, HistorySettings
-from experimaestro.experiments.configuration import DirtyGitAction
+from experimaestro.experiments.specification import DirtyGitAction
 
 if TYPE_CHECKING:
     from experimaestro.scheduler.dynamic_outputs import TaskOutputsReader

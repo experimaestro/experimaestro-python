@@ -11,7 +11,7 @@ __lazy_modules__ = [
     "experimaestro.core.serializers",
     "experimaestro.core.types",
     "experimaestro.exceptions",
-    "experimaestro.experiments.configuration",
+    "experimaestro.experiments.specification",
     "experimaestro.generators",
     "experimaestro.launcherfinder.registry",
     "experimaestro.launchers",
@@ -109,7 +109,7 @@ from .xpmutils import DirectoryContext
 from .mkdocs.annotations import documentation
 from .scheduler.base import Job
 from .launcherfinder.registry import LauncherRegistry
-from .experiments.configuration import DirtyGitAction
+from .experiments.specification import DirtyGitAction
 
 
 def set_launcher(launcher) -> None:

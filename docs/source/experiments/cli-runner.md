@@ -1,8 +1,8 @@
 # The CLI experiment runner
 
 The `experimaestro.experiments` module factorizes the boilerplate of launching
-an experiment: your code provides a `run(helper, cfg)` entry point, and the
-experimental parameters come from `YAML` configuration files.
+an experiment: your code provides a `run(helper, spec)` entry point, and the
+experimental parameters come from `YAML` files: the experiment specification.
 
 The experiment is then started with
 
@@ -22,21 +22,25 @@ passed to `run`. This mechanism can be extended to support more specific helpers
 
 ## The entry point
 
-The configuration class must derive from
-{py:class}`~experimaestro.experiments.ConfigurationBase`:
+The specification class must derive from
+{py:class}`~experimaestro.experiments.ExperimentSpecification`:
 
 ```python
 # experiment.py
-from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
+from experimaestro.experiments import (
+    ExperimentHelper,
+    specification,
+    ExperimentSpecification,
+)
 
 
-@configuration
-class Configuration(ConfigurationBase):
+@specification
+class Specification(ExperimentSpecification):
     #: Default learning rate
     learning_rate: float = 1e-3
 
 
-def run(helper: ExperimentHelper, cfg: Configuration):
+def run(helper: ExperimentHelper, spec: Specification):
     # Experimental code
     ...
 ```
@@ -52,7 +56,7 @@ learning_rate: 1e-4
 ### Using a module
 
 The entry point can also be a module, in which case the Python path can be set
-by the configuration file:
+by the YAML file:
 
 ```yaml
 # Module name containing the "run" function
@@ -69,8 +73,8 @@ pythonpath:
 ## YAML reference
 
 The options below come from
-{py:class}`~experimaestro.experiments.ConfigurationBase`; any other key is
-passed to your own configuration class.
+{py:class}`~experimaestro.experiments.ExperimentSpecification`; any other key is
+passed to your own specification class.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -89,9 +93,9 @@ passed to your own configuration class.
 | `dirty_git` | string | `"warn"` | Action when git has uncommitted changes: `ignore`, `warn`, or `error` |
 | `tags` | list | `None` | Tags of the experiment (e.g. `[eval, mice]`), to group and search experiments in the [monitoring interfaces](../interfaces.md) |
 
-## Composing configurations
+## Composing specifications
 
-Configurations are merged from several sources. In increasing order of
+Specifications are merged from several sources. In increasing order of
 priority: the files listed in `imports`, the `--pre-yaml` files, the main file,
 the `--post-yaml` files, and the `-c` overrides.
 
@@ -114,7 +118,7 @@ experimaestro run -c learning_rate=1e-5 -c model.hidden_size=512 \
     -c data.transforms.0.name=resize experiment.yaml
 ```
 
-Use `--show` to print the merged configuration as JSON instead of running the
+Use `--show` to print the merged specification as JSON instead of running the
 experiment — the quickest way to debug an inheritance or override problem:
 
 ```bash

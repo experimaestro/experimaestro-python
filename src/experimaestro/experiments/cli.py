@@ -18,7 +18,7 @@ import yaml
 from termcolor import cprint
 
 from experimaestro.exceptions import HandledException
-from experimaestro.experiments.configuration import ConfigurationBase
+from experimaestro.experiments.specification import ExperimentSpecification
 from experimaestro.launcherfinder.registry import LauncherRegistry
 from experimaestro.run_mode import RunMode
 from experimaestro.settings import find_workspace
@@ -57,13 +57,13 @@ class ExperimentHelper:
 
     """Handles extra arguments"""
 
-    def run(self, args: list[str], configuration: ConfigurationBase):
+    def run(self, args: list[str], spec: ExperimentSpecification):
         assert len(args) == 0
-        self.callable(self, configuration)
+        self.callable(self, spec)
 
     @classmethod
     def decorator(cls, *args, **kwargs):
-        """Decorator for the run(helper, configuration) method"""
+        """Decorator for the run(helper, spec) method"""
         if len(args) == 1 and len(kwargs) == 0 and inspect.isfunction(args[0]):
             return cls(callable)
 
@@ -76,10 +76,10 @@ class ExperimentHelper:
 class ExperimentCallable(Protocol):
     """Protocol for the run function"""
 
-    def __call__(self, helper: ExperimentHelper, configuration: Any): ...
+    def __call__(self, helper: ExperimentHelper, spec: Any): ...
 
 
-class ConfigurationLoader:
+class SpecificationLoader:
     def __init__(self):
         self.yamls = []
         self.python_path = set()
@@ -145,7 +145,9 @@ class ConfigurationLoader:
 
 
 @click.option("--debug", is_flag=True, help="Print debug information")
-@click.option("--show", is_flag=True, help="Print configuration and exits")
+@click.option(
+    "--show", is_flag=True, help="Print the merged experiment specification and exit"
+)
 @click.option(
     "--watcher",
     type=click.Choice(["auto", "polling", "inotify", "fsevents", "kqueue", "windows"]),
@@ -311,7 +313,7 @@ def experiments_cli(  # noqa: C901
         )
 
     # --- Loads the YAML
-    conf_loader = ConfigurationLoader()
+    conf_loader = SpecificationLoader()
     for y in pre_yaml:
         conf_loader.load(Path(y))
     conf_loader.load(Path(yaml_file))
@@ -455,17 +457,17 @@ def experiments_cli(  # noqa: C901
 
     # Move to an object container
     try:
-        xp_configuration: ConfigurationBase = validate_attrs(schema, configuration)
+        xp_spec: ExperimentSpecification = validate_attrs(schema, configuration)
     except Exception as e:
-        cprint(f"Error in configuration:\n\n{e}", "red", file=sys.stderr)
-        raise click.ClickException("Error in configuration")
+        cprint(f"Error in the experiment specification:\n\n{e}", "red", file=sys.stderr)
+        raise click.ClickException("Error in the experiment specification")
 
     # --- Sets up the experiment ID
-    if xp_configuration.add_timestamp:
+    if xp_spec.add_timestamp:
         timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M")
-        experiment_id = f"""{xp_configuration.id}-{timestamp}"""
+        experiment_id = f"""{xp_spec.id}-{timestamp}"""
     else:
-        experiment_id = xp_configuration.id
+        experiment_id = xp_spec.id
 
     # Define the workspace (may auto-select based on experiment_id triggers);
     # defaults to the one given to the root command (`experimaestro -w ID run`)
@@ -513,9 +515,9 @@ def experiments_cli(  # noqa: C901
                 run_mode=run_mode,
                 register_signals=register_signals,
                 project_paths=project_paths,
-                dirty_git=xp_configuration.dirty_git,
+                dirty_git=xp_spec.dirty_git,
                 no_db=no_db,
-                tags=xp_configuration.tags,
+                tags=xp_spec.tags,
             ) as xp:
                 if xp_holder is not None:
                     xp_holder["xp"] = xp
@@ -566,7 +568,7 @@ def experiments_cli(  # noqa: C901
 
                 # Run the experiment
                 helper.xp = xp
-                helper.run(list(args), xp_configuration)
+                helper.run(list(args), xp_spec)
 
                 # ... and wait for the jobs to finish
                 xp.wait()
@@ -666,7 +668,7 @@ def experiments_cli(  # noqa: C901
                     run_mode=run_mode,
                     register_signals=False,  # TUI handles signals
                     project_paths=project_paths,
-                    dirty_git=xp_configuration.dirty_git,
+                    dirty_git=xp_spec.dirty_git,
                     no_db=no_db,
                 ) as xp:
                     xp_holder["xp"] = xp
@@ -700,7 +702,7 @@ def experiments_cli(  # noqa: C901
                     # Run the experiment
                     helper.xp = xp
 
-                    helper.run(list(args), xp_configuration)
+                    helper.run(list(args), xp_spec)
 
                     # ... and wait
                     xp.wait()

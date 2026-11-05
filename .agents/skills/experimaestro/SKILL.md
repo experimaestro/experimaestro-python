@@ -325,21 +325,25 @@ with experiment(workdir, "my-experiment", port=12345) as xp:
     task = MyTask.C(param1="value", param2=42).submit()
 ```
 
-### CLI with YAML configuration
+### CLI with a YAML experiment specification
 
 ```python
 # experiment.py
-from experimaestro.experiments import ExperimentHelper, configuration, ConfigurationBase
+from experimaestro.experiments import (
+    ExperimentHelper,
+    specification,
+    ExperimentSpecification,
+)
 
 
-@configuration
-class Configuration(ConfigurationBase):
+@specification
+class Specification(ExperimentSpecification):
     learning_rate: float = 1e-3
 
 
-def run(helper: ExperimentHelper, cfg: Configuration):
+def run(helper: ExperimentHelper, spec: Specification):
     with helper.experiment() as xp:
-        MyTask.C(lr=cfg.learning_rate).submit()
+        MyTask.C(lr=spec.learning_rate).submit()
 ```
 
 ```yaml

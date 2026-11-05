@@ -1,12 +1,16 @@
 from experimaestro import tag
-from experimaestro.experiments import ConfigurationBase, ExperimentHelper, configuration
+from experimaestro.experiments import (
+    ExperimentSpecification,
+    ExperimentHelper,
+    specification,
+)
 from experimaestro.launcherfinder import find_launcher
 
 from tasks import Dataset, Evaluate, Learn
 
 
-@configuration
-class Configuration(ConfigurationBase):
+@specification
+class Specification(ExperimentSpecification):
     learning_rates: list[float]
     """Learning rates to compare"""
 
@@ -17,12 +21,12 @@ class Configuration(ConfigurationBase):
     """Resources needed by each task"""
 
 
-def run(helper: ExperimentHelper, cfg: Configuration):
-    launcher = find_launcher(cfg.launcher)
+def run(helper: ExperimentHelper, spec: Specification):
+    launcher = find_launcher(spec.launcher)
     train = Dataset.C(size=100, seed=1)
     test = Dataset.C(size=100, seed=2)
 
-    for lr in cfg.learning_rates:
-        learn = Learn.C(data=train, lr=tag(lr), epochs=cfg.epochs)
+    for lr in spec.learning_rates:
+        learn = Learn.C(data=train, lr=tag(lr), epochs=spec.epochs)
         model = learn.submit(launcher=launcher)
         Evaluate.C(model=model, data=test).submit(launcher=launcher)

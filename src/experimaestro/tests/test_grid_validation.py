@@ -1,16 +1,19 @@
 from experimaestro.experiments.grid import GridSearch, GenericParams
-from experimaestro.experiments.configuration import ConfigurationBase, configuration
+from experimaestro.experiments.specification import (
+    ExperimentSpecification,
+    specification,
+)
 from experimaestro.utils.config import validate_attrs
 import pytest
 
 
-@configuration()
+@specification()
 class SubConfig:
     value: GridSearch[int] = 1
 
 
-@configuration()
-class MainConfig(ConfigurationBase):
+@specification()
+class MainSpec(ExperimentSpecification):
     lr: GridSearch[float] = 0.01
     tags: list[str] | None = None
     sub: SubConfig | None = None
@@ -23,25 +26,25 @@ def test_validate_attrs_grid_search():
         "sub": {"value": {"values_list": [1, 2, 3]}},
     }
 
-    cfg = validate_attrs(MainConfig, data)
+    spec = validate_attrs(MainSpec, data)
 
-    assert isinstance(cfg.lr, GenericParams)
-    assert cfg.lr.values_list == [0.1, 0.01]
+    assert isinstance(spec.lr, GenericParams)
+    assert spec.lr.values_list == [0.1, 0.01]
 
-    assert isinstance(cfg.sub.value, GenericParams)
-    assert cfg.sub.value.values_list == [1, 2, 3]
+    assert isinstance(spec.sub.value, GenericParams)
+    assert spec.sub.value.values_list == [1, 2, 3]
 
 
 def test_validate_attrs_scalar():
     data = {"id": "test", "lr": 0.05, "sub": {"value": 10}}
 
-    cfg = validate_attrs(MainConfig, data)
+    spec = validate_attrs(MainSpec, data)
 
-    assert isinstance(cfg.lr, GenericParams)
-    assert cfg.lr.value == 0.05
+    assert isinstance(spec.lr, GenericParams)
+    assert spec.lr.value == 0.05
 
-    assert isinstance(cfg.sub.value, GenericParams)
-    assert cfg.sub.value.value == 10
+    assert isinstance(spec.sub.value, GenericParams)
+    assert spec.sub.value.value == 10
 
 
 def test_generate_grid_from_cli_config():
@@ -54,14 +57,14 @@ def test_generate_grid_from_cli_config():
         "sub": {"value": 0},
     }
 
-    cfg = validate_attrs(MainConfig, data)
-    configs, tags = generate_grid(cfg)
+    spec = validate_attrs(MainSpec, data)
+    specs, tags = generate_grid(spec)
 
-    assert len(configs) == 4
+    assert len(specs) == 4
 
     # Check one permutation
-    assert configs[0].lr in [0.1, 0.01]
-    assert configs[0].sub.value in [1, 2]
+    assert specs[0].lr in [0.1, 0.01]
+    assert specs[0].sub.value in [1, 2]
 
 
 def test_unique_value_in_tags_from_validation():
@@ -69,16 +72,16 @@ def test_unique_value_in_tags_from_validation():
 
     data = {"id": "test", "lr": 0.05, "sub": {"value": 10}}
 
-    cfg = validate_attrs(MainConfig, data)
-    configs, tags = generate_grid(cfg)
+    spec = validate_attrs(MainSpec, data)
+    specs, tags = generate_grid(spec)
 
-    assert len(configs) == 1
+    assert len(specs) == 1
     assert tags[0] == {}
 
     # Test with multi-value param
     data_multi = {"id": "test", "lr": [0.05, 0.1], "sub": {"value": 10}}
 
-    cfg_multi = validate_attrs(MainConfig, data_multi)
+    cfg_multi = validate_attrs(MainSpec, data_multi)
     configs_multi, tags_multi = generate_grid(cfg_multi)
 
     assert len(configs_multi) == 2
@@ -96,7 +99,7 @@ def test_unrecognized_key_in_validation():
     }
 
     with pytest.raises(ValidationError) as excinfo:
-        validate_attrs(MainConfig, data)
+        validate_attrs(MainSpec, data)
 
     err_msg = str(excinfo.value)
     assert "Unrecognized keys in GridSearch parameter: ranges" in err_msg
@@ -121,14 +124,14 @@ def test_validate_attrs_with_config_dicts():
         "sub": {"value": 0},
     }
 
-    cfg = validate_attrs(MainConfig, data)
-    configs, tags = generate_grid(cfg)
+    spec = validate_attrs(MainSpec, data)
+    specs, tags = generate_grid(spec)
 
-    assert len(configs) == 2
-    assert configs[0].lr == 0.05
-    assert configs[0].sub.value == 10
-    assert configs[1].lr == 0.005
-    assert configs[1].sub.value == 20
+    assert len(specs) == 2
+    assert specs[0].lr == 0.05
+    assert specs[0].sub.value == 10
+    assert specs[1].lr == 0.005
+    assert specs[1].sub.value == 20
 
     assert tags[0] == {"lr": 0.05, "sub.value": 10}
     assert tags[1] == {"lr": 0.005, "sub.value": 20}
@@ -139,8 +142,8 @@ def test_validate_attrs_with_grid_search_annotation():
     from typing import Any
     from experimaestro.experiments.grid import generate_grid
 
-    @configuration()
-    class CustomConfig(ConfigurationBase):
+    @specification()
+    class CustomConfig(ExperimentSpecification):
         grid_search: dict[str, GridSearch[Any]] = attr.field(factory=dict)
         lr: float | None = 0.01
         batch_size: int | None = 32
@@ -155,14 +158,14 @@ def test_validate_attrs_with_grid_search_annotation():
         },
     }
 
-    cfg = validate_attrs(CustomConfig, data)
-    configs, tags = generate_grid(cfg)
+    spec = validate_attrs(CustomConfig, data)
+    specs, tags = generate_grid(spec)
 
-    assert len(configs) == 2
-    assert configs[0].lr == 0.05
-    assert configs[0].batch_size == 16
-    assert configs[1].lr == 0.005
-    assert configs[1].batch_size == 64
+    assert len(specs) == 2
+    assert specs[0].lr == 0.05
+    assert specs[0].batch_size == 16
+    assert specs[1].lr == 0.005
+    assert specs[1].batch_size == 64
 
     assert tags[0] == {"lr": 0.05, "batch_size": 16}
     assert tags[1] == {"lr": 0.005, "batch_size": 64}
@@ -176,4 +179,4 @@ def test_error_attrs_raises_on_unrecognized_keys():
     }
 
     with pytest.raises(ValueError, match="unexpected_key_xyz"):
-        validate_attrs(MainConfig, data)
+        validate_attrs(MainSpec, data)

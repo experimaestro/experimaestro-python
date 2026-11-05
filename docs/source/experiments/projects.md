@@ -81,27 +81,31 @@ experiment-template/
 ├── pyproject.toml          # project + dependencies (depends on experimaestro)
 ├── my_project/
 │   ├── __init__.py
-│   ├── experiment.py       # the run(helper, cfg) entry point
-│   └── normal.yaml         # experiment configuration (id, module, parameters)
+│   ├── experiment.py       # the run(helper, spec) entry point
+│   └── normal.yaml         # experiment specification (id, module, parameters)
 └── README.md
 ```
 
 The entry point is a `run` function taking an
-{py:class}`~experimaestro.experiments.cli.ExperimentHelper` and a configuration
+{py:class}`~experimaestro.experiments.cli.ExperimentHelper` and a specification
 object:
 
 ```python
 # my_project/experiment.py
-from experimaestro.experiments import ConfigurationBase, ExperimentHelper, configuration
+from experimaestro.experiments import (
+    ExperimentSpecification,
+    ExperimentHelper,
+    specification,
+)
 
 
-@configuration
-class Configuration(ConfigurationBase):
+@specification
+class Specification(ExperimentSpecification):
     my_param: int
     """An experimental parameter"""
 
 
-def run(helper: ExperimentHelper, cfg: Configuration):
+def run(helper: ExperimentHelper, spec: Specification):
     # Build and submit your experimental plan here
     ...
 ```
@@ -121,8 +125,8 @@ and the experiment is launched with:
 uv run experimaestro run my_project/normal
 ```
 
-`run-experiment` reads the YAML, builds the `Configuration` object (validating
-types), imports the module, and calls its `run(helper, cfg)` function. See the
+`run-experiment` reads the YAML, builds the `Specification` object (validating
+types), imports the module, and calls its `run(helper, spec)` function. See the
 [CLI experiment runner](cli-runner.md) for the full list of
 YAML options (`id`, `file`/`module`, `pythonpath`, `imports`, `pre_experiment`,
 `dirty_git`, …) and the [CLI documentation](../cli.md#running-experiments) for
@@ -143,8 +147,8 @@ experimaestro-demo/
 ├── mnist_xp/
 │   ├── learn.py              # Config / Task definitions (CNN model, Learn, Evaluate)
 │   ├── data.py               # dataset configurations (via datamaestro)
-│   ├── experiment.py         # run(helper, cfg): builds and submits the plan
-│   ├── params.yaml           # configuration values (id, launcher, hyper-parameters)
+│   ├── experiment.py         # run(helper, spec): builds and submits the plan
+│   ├── params.yaml           # experiment specification (id, launcher, hyper-parameters)
 │   ├── actions.py            # post-experiment Actions (e.g. export best model)
 │   ├── analyze.py            # post-hoc result analysis (load_xp_info)
 │   └── tensorboard_service.py# a custom experiment service
@@ -157,14 +161,14 @@ The roles of the pieces:
   {py:class}`~experimaestro.Config` and {py:class}`~experimaestro.Task` classes
   — the experimental building blocks. See
   [Configurations](config.md) and [Tasks](task.md).
-- **`experiment.py`** is the orchestration layer: its `run(helper, cfg)`
+- **`experiment.py`** is the orchestration layer: its `run(helper, spec)`
   function composes those components into an
   [experimental plan](plan.md) and submits the tasks. `helper.xp` is the
   underlying {py:class}`~experimaestro.experiment` context (for
   `helper.xp.add_service(...)`, `helper.xp.add_action(...)`,
   `helper.xp.wait()`, …).
 - **YAML files** (`params.yaml`) provide the values for the project's
-  `Configuration` (a {py:class}`~experimaestro.experiments.ConfigurationBase`
+  `Specification` (a {py:class}`~experimaestro.experiments.ExperimentSpecification`
   subclass) and the experiment metadata. Multiple YAML files can be layered with
   `imports:` or `--pre-yaml`/`--post-yaml`, and values overridden on the command
   line with `-c`.
@@ -203,13 +207,13 @@ unchanged on a laptop and on a cluster.
 A project can also be a **library** that factors common experimental components
 and a specialised experiment helper for a whole research domain, which other
 projects then depend on. The pattern is to subclass
-{py:class}`~experimaestro.experiments.ConfigurationBase` for domain-wide
+{py:class}`~experimaestro.experiments.ExperimentSpecification` for domain-wide
 settings and wrap `run-experiment` with a custom decorator/helper.
 
 [experimaestro-ir (xpmir)](https://github.com/experimaestro/experimaestro-ir) is
 the reference example. It provides:
 
-- domain configuration bases such as `NeuralIRExperiment(ConfigurationBase)`
+- domain specification bases such as `NeuralIRExperiment(ExperimentSpecification)`
   (adding `gpu`, `seed`, a shared `random`, …);
 - experiment decorators `@ir_experiment()` / `@learning_experiment()` and
   matching helpers (`IRExperimentHelper`, `LearningExperimentHelper`) that add
@@ -220,18 +224,18 @@ A downstream project then depends on `xpmir` and writes a much shorter
 `experiment.py`:
 
 ```python
-from experimaestro.experiments import configuration
+from experimaestro.experiments import specification
 from xpmir.experiments.ir import PaperResults, ir_experiment, IRExperimentHelper
 
 
-@configuration
-class Configuration:
+@specification
+class Specification:
     #: Default learning rate
     learning_rate: float = 1e-3
 
 
 @ir_experiment()
-def run(helper: IRExperimentHelper, cfg: Configuration) -> PaperResults:
+def run(helper: IRExperimentHelper, spec: Specification) -> PaperResults:
     ...
     return PaperResults(models=..., evaluations=..., tb_logs=...)
 ```
@@ -244,6 +248,6 @@ for the full helper API.
 - [Tutorial](../tutorial.md) — the main concepts on a small example, and the demo project.
 - [Running experiments](../experiments.md) — launching experiments, and the
   practices that keep results reusable.
-- [The CLI experiment runner](cli-runner.md) — the YAML configuration reference.
+- [The CLI experiment runner](cli-runner.md) — the YAML experiment specification reference.
 - [Experimental plan](plan.md) — composing and submitting tasks.
 - [Workspaces](workspace.md) & [Settings](../settings.md) — where outputs go.

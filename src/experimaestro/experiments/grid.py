@@ -264,7 +264,7 @@ def _get_type_converter(target_type: Any):
 
 
 def _validate_and_convert_config_dicts(
-    cfg: Any,
+    spec: Any,
     config_dicts: Any,
     grid_params: dict[str, GenericParams],
     explicit_keys: set[str],
@@ -323,7 +323,7 @@ def _validate_and_convert_config_dicts(
 
     converters = {}
     for key in expected_keys:
-        target_type = get_nested_attr_type(cfg, key)
+        target_type = get_nested_attr_type(spec, key)
         converters[key] = _get_type_converter(target_type)
 
     converted_config_dicts = []
@@ -356,24 +356,24 @@ def _without_duplicates(values: list, raw_values: list, what: str) -> list:
     return unique
 
 
-def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
+def generate_grid(spec: Any) -> tuple[list[Any], list[dict]]:
     """
     Generates a list of configuration permutations for a grid search, based
     on a `grid_search` dictionary in the main configuration object or inline definitions.
 
     returns:
-     configs: List of all configurations
-     tags: a list of dicts with the same length as configs, where each dict
-           contains the parameter values that were set for that config.
+     specs: List of all specifications
+     tags: a list of dicts with the same length as specs, where each dict
+           contains the parameter values that were set for that specification.
     """
     # 1. Discover inline grid parameters
-    grid_params = discover_grid_params(cfg)
+    grid_params = discover_grid_params(spec)
 
     # 2. Extract config_dicts and merge remaining explicit grid_search block
     raw_config_dicts = None
     explicit_keys: set[str] = set()
-    if hasattr(cfg, "grid_search") and cfg.grid_search:
-        explicit_grid = dict(cfg.grid_search)
+    if hasattr(spec, "grid_search") and spec.grid_search:
+        explicit_grid = dict(spec.grid_search)
         raw_config_dicts = explicit_grid.pop("config_dicts", None)
         explicit_keys = set(explicit_grid.keys())
         for path, gp in explicit_grid.items():
@@ -385,23 +385,23 @@ def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
     converted_config_dicts = None
     if raw_config_dicts is not None:
         converted_config_dicts = _validate_and_convert_config_dicts(
-            cfg, raw_config_dicts, grid_params, explicit_keys
+            spec, raw_config_dicts, grid_params, explicit_keys
         )
         # Remove config_dicts keys from grid_params since their values are provided by config_dicts
         for key in converted_config_dicts[0].keys():
             grid_params.pop(key, None)
 
-    # If no grid parameters and no config_dicts found, just return the original config.
+    # If no grid parameters and no config_dicts found, just return the original specification.
     if not grid_params and not converted_config_dicts:
-        logger.info("no params to grid search, returning raw config")
-        new_cfg = copy.deepcopy(cfg)
-        finalize_config(new_cfg)
-        return [new_cfg], [{}]
+        logger.info("no params to grid search, returning the specification as is")
+        new_spec = copy.deepcopy(spec)
+        finalize_config(new_spec)
+        return [new_spec], [{}]
 
     param_paths = list(grid_params.keys())
     value_options = []
     for path in param_paths:
-        target_type = get_nested_attr_type(cfg, path)
+        target_type = get_nested_attr_type(spec, path)
         converter = _get_type_converter(target_type)
 
         gp_from_framework = (
@@ -429,32 +429,32 @@ def generate_grid(cfg: Any) -> tuple[list[Any], list[dict]]:
             if any(d[key] != first_dict[key] for d in converted_config_dicts[1:]):
                 varying_dict_keys.add(key)
 
-    output_configs = []
+    output_specs = []
     tags = []
-    base_cfg = copy.deepcopy(cfg)
-    # Clear grid_search to make generated configs clean
-    if hasattr(base_cfg, "grid_search"):
-        base_cfg.grid_search = {}
+    base_spec = copy.deepcopy(spec)
+    # Clear grid_search to make generated specifications clean
+    if hasattr(base_spec, "grid_search"):
+        base_spec.grid_search = {}
 
-    logger.info("Building grid search configs")
+    logger.info("Building grid search specifications")
     for param_combo, cfg_dict in product(grid_combinations, dict_combinations):
-        cfg_tags = {}
-        new_cfg = copy.deepcopy(base_cfg)
+        spec_tags = {}
+        new_spec = copy.deepcopy(base_spec)
 
         for i, (path, value) in enumerate(zip(param_paths, param_combo)):
             if len(value_options[i]) > 1:
-                cfg_tags[path] = value
-            set_nested_attr(new_cfg, path, value)
+                spec_tags[path] = value
+            set_nested_attr(new_spec, path, value)
 
         for path, value in cfg_dict.items():
             if path in varying_dict_keys:
-                cfg_tags[path] = value
-            set_nested_attr(new_cfg, path, value)
+                spec_tags[path] = value
+            set_nested_attr(new_spec, path, value)
 
         # Convert any remaining single-value GenericParams to scalars
-        finalize_config(new_cfg)
+        finalize_config(new_spec)
 
-        output_configs.append(new_cfg)
-        tags.append(cfg_tags)
+        output_specs.append(new_spec)
+        tags.append(spec_tags)
 
-    return output_configs, tags
+    return output_specs, tags
