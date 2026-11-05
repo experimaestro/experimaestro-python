@@ -101,6 +101,18 @@ def state_dict(self):
     return {"log_dir": self.log_dir}  # Path is auto-handled
 ```
 
+Symbolic links under these paths are followed by the synchronization (this is
+how TensorBoard sees the runs of the jobs). A service that only *lists* other
+files in its directory (e.g. files of jobs) returns their (local cache) paths
+from `sync_files()`: it is called after each synchronization of the service
+paths, and the files are then synchronized too (only those files, not the rest
+of their directory):
+
+```python
+def sync_files(self) -> list[Path]:
+    return [self.path / entry for entry in self.registered_files()]
+```
+
 ## Adding a service to an experiment
 
 Services are added to an experiment using the

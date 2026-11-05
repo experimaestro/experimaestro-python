@@ -165,6 +165,77 @@ def test_ssh_local_service_starting_state():
         ssh_service.stop()
 
 
+def test_ssh_local_service_syncs_service_files(tmp_path):
+    """The files a service reads outside of its paths (sync_files) are
+    synchronized, one synchronizer per directory, restricted to those files"""
+    import threading
+    from pathlib import Path
+    from unittest.mock import MagicMock
+    from experimaestro.scheduler.services import ServiceState
+    from experimaestro.scheduler.remote.client import SSHLocalService
+
+    cache = tmp_path / "cache"
+    job_dir = cache / "jobs" / "pkg.Task" / "abc123"
+    files = [job_dir / "table.jsonl"]
+
+    mock_inner = MagicMock()
+    mock_inner.id = "tables"
+    mock_inner.state = ServiceState.STOPPED
+    mock_inner.url = None
+    mock_inner.sync_include_patterns = None
+    mock_inner.sync_files.side_effect = lambda: list(files)
+
+    def fake_inner_get_url():
+        mock_inner.state = ServiceState.RUNNING
+        mock_inner.url = "http://localhost:1234"
+        return mock_inner.url
+
+    mock_inner.get_url.side_effect = fake_inner_get_url
+
+    calls = []
+    synced = threading.Condition()
+
+    def sync_path(remote_path, include=None):
+        with synced:
+            calls.append((remote_path, include))
+            synced.notify_all()
+        return cache / "results"
+
+    def translate_path(path):
+        return "/remote/ws/" + str(Path(path).relative_to(cache))
+
+    state_provider = MagicMock()
+    state_provider.local_cache_dir = cache
+    state_provider.sync_path.side_effect = sync_path
+    state_provider.translate_path.side_effect = translate_path
+    state_provider.local_path.side_effect = lambda p: cache / "results"
+
+    def wait_for(call):
+        with synced:
+            assert synced.wait_for(lambda: call in calls, timeout=5.0), calls
+
+    service = SSHLocalService(
+        inner_service=mock_inner,
+        state_provider=state_provider,
+        remote_paths=["/remote/ws/results"],
+    )
+    try:
+        service.get_url()
+        wait_for(("/remote/ws/jobs/pkg.Task/abc123", ["/table.jsonl"]))
+        assert job_dir.is_dir()
+        assert list(service._file_synchronizers) == [job_dir]
+
+        # Files outside of the workspace cache are ignored, and a new file in
+        # the same directory recreates its synchronizer
+        files.extend([tmp_path / "elsewhere" / "t.csv", job_dir / "other.csv"])
+        service._update_file_syncs()
+        wait_for(("/remote/ws/jobs/pkg.Task/abc123", ["/other.csv", "/table.jsonl"]))
+        assert list(service._file_synchronizers) == [job_dir]
+    finally:
+        service.stop()
+    assert service._file_synchronizers == {}
+
+
 def test_services_list_double_start_guard():
     """Verify that ServicesList ignores second start_service call while service is starting"""
     from unittest.mock import MagicMock

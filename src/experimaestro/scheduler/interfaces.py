@@ -2168,6 +2168,17 @@ class BaseService(ABC):
             return ["*events.out.tfevents*"]
         return None
 
+    def sync_files(self) -> list[Path]:
+        """Files the service reads outside of its own paths
+
+        Called while the service runs (e.g. each time its paths have been
+        synchronized), so that the list can grow: when monitoring a remote
+        workspace, these files (given by their local cache path) are
+        synchronized along with the service paths. For instance, a service
+        whose directory lists files of jobs returns those files.
+        """
+        return []
+
     def full_state_dict(self) -> dict[str, Any]:
         """Get service state as dictionary for JSON serialization.
 

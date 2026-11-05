@@ -254,6 +254,13 @@ class SSHLocalService(BaseService):
         self._state_provider = state_provider
         self._remote_paths = remote_paths
         self._synchronizers: list["AdaptiveSynchronizer"] = []
+        #: Synchronizers of the files the service reads outside of its paths
+        #: (see :meth:`BaseService.sync_files`): directory -> (file names,
+        #: synchronizer)
+        self._file_synchronizers: dict[
+            Path, tuple[frozenset[str], "AdaptiveSynchronizer"]
+        ] = {}
+        self._file_sync_lock = threading.Lock()
         self._on_status_change = on_status_change
         self._start_lock = threading.Lock()
         self._starting = False
@@ -303,6 +310,72 @@ class SSHLocalService(BaseService):
     @property
     def sync_include_patterns(self) -> list[str] | None:
         return self._inner.sync_include_patterns
+
+    def sync_files(self) -> list[Path]:
+        return self._inner.sync_files()
+
+    def _on_paths_synced(self, local_path: Path) -> None:
+        """Called after each sync of a service path"""
+        self._update_file_syncs()
+        self._notify_status_change()
+
+    def _update_file_syncs(self) -> None:
+        """Synchronize the files the service reads outside of its paths
+
+        The files are grouped by directory: one synchronizer per directory,
+        restricted to the files (the job directories they are in can be
+        large). A directory synchronizer is recreated when its files change.
+        """
+        from experimaestro.scheduler.remote.adaptive_sync import (
+            AdaptiveSynchronizer,
+        )
+
+        sync_files = getattr(self._inner, "sync_files", None)
+        if sync_files is None:
+            return
+        try:
+            files = [Path(f) for f in sync_files()]
+        except Exception:
+            logger.exception("Could not list the files of service %s", self.id)
+            return
+
+        local_cache = self._state_provider.local_cache_dir
+        directories: dict[Path, set[str]] = {}
+        for file in files:
+            if local_cache is None or not file.is_relative_to(local_cache):
+                logger.debug("Not synchronizing %s (not in the workspace)", file)
+                continue
+            directories.setdefault(file.parent, set()).add(file.name)
+
+        replaced: list["AdaptiveSynchronizer"] = []
+        with self._file_sync_lock:
+            if not self._synchronizers:
+                # The service has been stopped
+                return
+            for directory, names in directories.items():
+                names = frozenset(names)
+                current = self._file_synchronizers.get(directory)
+                if current is not None:
+                    if current[0] == names:
+                        continue
+                    old = current[1]
+                    old.request_stop()
+                    self._state_provider.cancel_sync(old.remote_path)
+                    replaced.append(old)
+                directory.mkdir(parents=True, exist_ok=True)
+                sync = AdaptiveSynchronizer(
+                    sync_func=self._state_provider.sync_path,
+                    remote_path=self._state_provider.translate_path(directory),
+                    name=f"service:{self._inner.id}:files",
+                    # Anchored: only these files, not those of sub-directories
+                    include=[f"/{name}" for name in sorted(names)],
+                    # The job may not have started yet
+                    max_retries=0,
+                )
+                self._file_synchronizers[directory] = (names, sync)
+                sync.start()
+        for sync in replaced:
+            sync.stop()
 
     def _notify_status_change(self) -> None:
         """Notify that sync status has changed."""
@@ -355,10 +428,11 @@ class SSHLocalService(BaseService):
                         name=f"service:{self._inner.id}",
                         include=include,
                         on_sync_start=lambda: self._notify_status_change(),
-                        on_sync_complete=lambda _: self._notify_status_change(),
+                        on_sync_complete=self._on_paths_synced,
                     )
-                    sync.start()
+                    # Listed before starting: the sync callback checks it
                     self._synchronizers.append(sync)
+                    sync.start()
 
         # Start the inner service out of the lock, so that it can be stopped
         # while starting
@@ -402,7 +476,10 @@ class SSHLocalService(BaseService):
 
     def _stop_syncs(self) -> None:
         """Stop all adaptive synchronizers, killing the running syncs"""
-        synchronizers, self._synchronizers = self._synchronizers, []
+        with self._file_sync_lock:
+            synchronizers, self._synchronizers = self._synchronizers, []
+            synchronizers.extend(sync for _, sync in self._file_synchronizers.values())
+            self._file_synchronizers = {}
         for sync in synchronizers:
             sync.request_stop()
         for sync in synchronizers:
