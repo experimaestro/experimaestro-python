@@ -485,6 +485,24 @@ class Job(BaseJob, Resource):
         """Full task locator (for BaseJob interface)"""
         return self.identifier
 
+    @property
+    def no_environmental_impact(self) -> bool:
+        """Whether carbon tracking is turned off by the experiments of this job
+
+        A job shared by several experiments is tracked as soon as one of them
+        wants it. A job which is not registered (``RunMode.GENERATE_ONLY``)
+        follows the current experiment.
+        """
+        from experimaestro.scheduler.experiment import experiment
+
+        experiments = self.experiments
+        if not experiments and experiment.CURRENT is not None:
+            experiments = [experiment.CURRENT]
+
+        return bool(experiments) and all(
+            xp._no_environmental_impact for xp in experiments
+        )
+
     def prepare(self, overwrite=False):
         """Prepare all files before starting a task
 

@@ -5,10 +5,12 @@ import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
+from experimaestro import Param, Task, experiment
 from experimaestro.carbon.base import CarbonMetrics, NullCarbonTracker
 from experimaestro.carbon.utils import (
     format_co2,
@@ -27,8 +29,11 @@ from experimaestro.carbon.region import get_cached_region_info, RegionInfo
 from experimaestro.carbon import create_tracker
 from experimaestro.scheduler.state_status import CarbonMetricsEvent
 from experimaestro.scheduler.state_provider import MockJob, CarbonMetricsData
+from experimaestro.scheduler import JobState
 from experimaestro.scheduler.interfaces import JobFailureStatus
-from experimaestro.settings import CarbonSettings
+from experimaestro.scheduler.jobs import Job
+from experimaestro.scheduler.workspace import RunMode
+from experimaestro.settings import CarbonSettings, get_settings
 
 # Mark all tests in this module as carbon tests
 pytestmark = [pytest.mark.carbon]
@@ -993,3 +998,66 @@ class TestCarbonAccumulationAcrossRetries:
             # Should still have only 1 record (no duplicate)
             records = storage.get_job_records(job_id)
             assert len(records) == 1
+
+
+class NoopTask(Task):
+    """A task doing nothing"""
+
+    value: Param[int]
+
+    def execute(self):
+        pass
+
+
+def _carbon_params(job) -> dict:
+    return json.loads((job.path / "params.json").read_text())["carbon"]
+
+
+class TestNoEnvironmentalImpact:
+    """experiment(no_environmental_impact=True) reaches the job process"""
+
+    @pytest.fixture(autouse=True)
+    def carbon_enabled(self, monkeypatch):
+        """Carbon tracking is turned off by default during the tests"""
+        carbon = get_settings().carbon
+        monkeypatch.setattr(carbon, "enabled", True)
+        monkeypatch.setattr(carbon, "warn_if_unavailable", False)
+
+    @pytest.mark.parametrize("opted_out", [True, False])
+    def test_job_settings(self, tmp_path, opted_out):
+        with experiment(tmp_path, "xp", no_environmental_impact=opted_out):
+            config = NoopTask.C(value=1)
+            config.submit()
+
+        job = config.__xpm__.job
+        assert job.state == JobState.DONE
+        assert _carbon_params(job)["enabled"] is not opted_out
+
+    def test_generate_only(self, tmp_path):
+        with experiment(
+            tmp_path,
+            "xp",
+            no_environmental_impact=True,
+            run_mode=RunMode.GENERATE_ONLY,
+        ):
+            config = NoopTask.C(value=1)
+            config.submit()
+
+        assert _carbon_params(config.__xpm__.job)["enabled"] is False
+
+    def test_settings_win_over_the_experiment(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(get_settings().carbon, "enabled", False)
+        with experiment(tmp_path, "xp", no_environmental_impact=False):
+            config = NoopTask.C(value=1)
+            config.submit()
+
+        assert _carbon_params(config.__xpm__.job)["enabled"] is False
+
+    def test_shared_job_is_tracked_if_one_experiment_wants_it(self):
+        def job(*opted_out):
+            xps = [SimpleNamespace(_no_environmental_impact=v) for v in opted_out]
+            return Job.no_environmental_impact.fget(SimpleNamespace(experiments=xps))
+
+        assert job(True, True)
+        assert not job(True, False)
+        assert not job(False, False)

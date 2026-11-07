@@ -1419,8 +1419,9 @@ class ConfigInformation:
         # Include carbon settings so they're available during task execution
         # without needing to load the settings file (which may have unresolved
         # environment variable interpolations on compute nodes)
-        carbon_settings = context.workspace.settings.carbon
-        data["carbon"] = dataclasses.asdict(carbon_settings)
+        data["carbon"] = dataclasses.asdict(context.workspace.settings.carbon)
+        if self.job is not None and self.job.no_environmental_impact:
+            data["carbon"]["enabled"] = False
 
         json.dump(data, out)
 

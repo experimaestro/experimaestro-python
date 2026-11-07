@@ -232,8 +232,10 @@ class experiment(BaseExperiment):
             is now a no-op as the database has been replaced with filesystem-based
             state tracking.
 
-        :param no_environmental_impact: Disable carbon tracking and the warning
-            shown when CodeCarbon is not installed. Default: False.
+        :param no_environmental_impact: Disable carbon tracking for the jobs of
+            this experiment (a job shared with another experiment that does not
+            set it is still tracked) and the warning shown when the tracker is
+            not installed. Default: False.
 
         :param tags: Tags of the experiment (e.g. ``["eval", "mice"]``), stored
             with the run: the UIs can group and search experiments by tag.

@@ -174,7 +174,8 @@ Tracking on Apple Silicon is **experimental, and can largely undercount**:
 
 ## Turning it off
 
-Set `enabled: false` in the `carbon` section of the settings. To only silence the
-warning when the extra is not installed, set `warn_if_unavailable: false`;
-`experiment(..., no_environmental_impact=True)` also removes the warning and the
-experiment's consolidated figures, but does not stop the jobs from being tracked.
+Set `enabled: false` in the `carbon` section of the settings. To turn it off for
+one experiment, use `experiment(..., no_environmental_impact=True)`: its jobs are
+not tracked, unless they are shared with an experiment that does not set it. To
+only silence the warning when the extra is not installed, set
+`warn_if_unavailable: false`.
