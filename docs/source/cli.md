@@ -316,14 +316,14 @@ experimaestro experiments [OPTIONS] COMMAND
 
 | Command | Description |
 |---------|-------------|
-| `list` | List experiments in the workspace |
+| `list` | List experiments in the workspace (`--group TAG`: only those with this experiment tag, can be repeated) |
 | `dag` | Show the dependency graph of an experiment (see [below](#experiment-dag-visualization)) |
 | `copy` | Copy an experiment between workspaces |
 | `runs list` / `runs prune` | History of the runs of an experiment, and pruning |
 | `runs tag` / `runs untag` / `runs tags` | Tag runs of an experiment |
 | `services list` / `services start` | Inspect and start experiment services |
 | `actions list` / `actions run` | Experiment actions (alpha) |
-| `carbon summary` / `carbon stats` | Carbon tracking |
+| `carbon summary` / `carbon stats` | Carbon footprint (see [below](#carbon-summary-command)) |
 
 A run's status is `completed`, `failed`, `running` (its experiment is still
 running) or `aborted` (the experiment process died before the end of the run,
@@ -363,6 +363,30 @@ experimaestro --workdir /path/to/workspace monitor --console
 # Custom port for web interface
 experimaestro --workdir /path/to/workspace monitor --web --port 8080
 ```
+
+### Carbon Summary Command
+
+Adds up the energy and CO₂ recorded for the selected experiments, each job being
+counted once (see [Carbon footprint of a project](experiments/carbon.md)):
+
+```bash
+# The whole workspace
+experimaestro experiments carbon summary
+
+# A group: the experiments having this tag in their current run, all their runs
+# being counted; with the details per experiment and per task
+experimaestro experiments carbon summary --group project-x -v --by-task
+```
+
+| Option | Description |
+|--------|-------------|
+| `--group`, `-g` | Experiments with this [experiment tag](interfaces.md#experiment-tags) (can be repeated) |
+| `--name`, `-n` | Experiments whose ID matches this regular expression |
+| `--tag`, `-t` | Only the runs with this run tag (can be repeated) |
+| `--latest-only` | Only the latest run of each job |
+| `--verbose`, `-v` | Details per experiment (a shared job is listed in each of them) |
+| `--by-task` | Details per task type |
+| `--json` | Output as JSON |
 
 ### Remote (SSH) workspaces
 

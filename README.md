@@ -22,6 +22,7 @@ Unlike traditional schedulers, Experimaestro focuses on the **experimental logic
 - **📁 Organized by Design:** Results are automatically cached in a predictable directory structure derived from task identifiers. No more "results_v2_final_fixed.pt"—your file system stays as clean as your code.
 - **🏗️ Built-in Scalability:** Seamlessly transition from local testing to high-performance clusters. Use **Connectors** (Local, SSH) and **Launchers** (Direct, Slurm) to run the same experimental code across different environments.
 - **📺 Real-time Monitoring:** Track running and completed experiments as they progress, from a textual (terminal) UI or a web UI.
+- **🌱 [Carbon Footprint](https://experimaestro-python.readthedocs.io/en/stable/experiments/carbon.html):** Track the **energy and CO₂ of your jobs**, and add them up for a whole project or group of experiments, with per-experiment and per-task details.
 
 ## Documentation
 

@@ -173,7 +173,9 @@ The roles of the pieces:
   `imports:` or `--pre-yaml`/`--post-yaml`, and values overridden on the command
   line with `-c`.
 - **`pyproject.toml`** declares the package and its dependencies (at least
-  `experimaestro`, plus extras such as `experimaestro[carbon]`), and configures
+  `experimaestro`, plus extras such as
+  [`experimaestro[carbon]`](carbon.md) to follow the footprint of the project),
+  and configures
   the tooling (ruff, mypy with the `experimaestro.mypy` plugin, pytest).
 - **`xpm_settings.yaml`** is an optional, project-local copy of the
   [workspace settings](workspace.md): it declares *where* job outputs go and,

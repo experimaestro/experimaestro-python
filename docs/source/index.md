@@ -30,6 +30,8 @@ Experimaestro solves common pain points in research workflows by providing:
 
 - 📺 **Real-time Monitoring** Track running and completed experiments as they progress, from a textual (terminal) UI or a web UI.
 
+- 🌱 **[Carbon Footprint](./experiments/carbon.md)** Track the **energy and CO₂ of your jobs**, and add them up for a whole project or group of experiments, with per-experiment and per-task details.
+
 ---
 
 ## Difference with Other Projects
@@ -105,6 +107,7 @@ experiments/actions
 experiments/analysis
 experiments/projects
 experiments/workspace
+experiments/carbon
 ```
 
 ```{toctree}

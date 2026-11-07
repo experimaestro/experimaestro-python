@@ -16,6 +16,7 @@ Where to find what, depending on what you are trying to do.
 | Watch what is running | [Interfaces](./interfaces.md) |
 | Share a workspace with colleagues | [Sharing a workspace](./experiments.md#sharing-a-workspace) |
 | Collect and plot results | [Analysis](./experiments/analysis.md) |
+| Measure the carbon footprint of a project | [Carbon footprint](./experiments/carbon.md) |
 | Understand what is written on disk | [Workspace layout](./experiments/workspace.md) |
 | Look up a class or a command | [API reference](./api/index.md) and [CLI reference](./cli.md) |
 
@@ -54,6 +55,8 @@ Take an experiment from your editor to results:
   act on jobs, then collect and compare their results.
 - [Workspace layout](./experiments/workspace.md): what experimaestro writes on
   disk, and how to read it.
+- [Carbon footprint](./experiments/carbon.md): the energy and CO₂ of your jobs,
+  for a whole project or group of experiments.
 
 ## ⚙️ Execution and infrastructure
 

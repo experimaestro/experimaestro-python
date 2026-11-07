@@ -226,6 +226,21 @@ workspaces:
 - `use` folders should never be cleaned by `experimaestro workspace orphans
   --clean` against a different workspace.
 
+## Carbon Tracking
+
+The [carbon footprint of the jobs](experiments/carbon.md) is recorded when the
+`experimaestro[carbon]` extra is installed, and configured by the top-level
+`carbon` section:
+
+```yaml
+carbon:
+  enabled: true              # Track the jobs
+  country_iso_code: FRA      # Carbon intensity of this country (ISO 3166-1 alpha-3), instead of detecting it
+  region: null               # Region, instead of detecting it
+  report_interval_s: 60      # Period of the updates sent while a job runs
+  warn_if_unavailable: true  # Warn and pause when tracking is not available
+```
+
 ## Remote Workspaces (SSH)
 
 Workspaces can be configured with SSH settings for remote access. A workspace

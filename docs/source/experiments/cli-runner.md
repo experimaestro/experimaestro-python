@@ -91,7 +91,7 @@ passed to your own specification class.
 | `paper` | string | `""` | Source paper reference for this experiment |
 | `add_timestamp` | bool | `False` | Append timestamp (`YYYYMMDD-HHMM`) to experiment ID |
 | `dirty_git` | string | `"warn"` | Action when git has uncommitted changes: `ignore`, `warn`, or `error` |
-| `tags` | list | `None` | Tags of the experiment (e.g. `[eval, mice]`), to group and search experiments in the [monitoring interfaces](../interfaces.md) |
+| `tags` | list | `None` | Tags of the experiment (e.g. `[eval, mice]`), to group and search experiments in the [monitoring interfaces](../interfaces.md), and to select them on the command line (`experiments list --group`, [`carbon summary --group`](carbon.md)) |
 
 ## Composing specifications
 

@@ -47,7 +47,7 @@ Then open `http://localhost:12345` in your browser.
   by ID or [tag](#experiment-tags) and sortable by status, name or start date
   (newest first by default), by clicking the column headers; *Group by* prefix
   or tag, with collapsible groups showing their number of experiments per
-  status
+  status and their [total CO₂](experiments/carbon.md)
 - **Job List**: View all jobs with their status (pending, running, done, error),
   sortable by status, task, submission date or job ID
 - **Keyboard Shortcuts**: The TUI keys, outside text fields: `/` to search the
@@ -306,6 +306,11 @@ the search also matches them. The experiments can be grouped:
   ID (`msmarco-splade` and `msmarco_bm25` are both in `msmarco`);
 - by **tag**: an experiment is in the group of each of its tags, and those
   without tags are in the last group, *(untagged)*.
+
+The header of a group shows its [total CO₂](experiments/carbon.md): all the runs
+of its experiments, a job they share being counted once. On the command line,
+`--group` selects the experiments with a tag (`experiments list --group`,
+`experiments carbon summary --group`).
 
 ## Job Filter Expressions
 
