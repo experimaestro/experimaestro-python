@@ -308,6 +308,27 @@ class Scheduler(StateProvider, threading.Thread):
             # The experiment's _status property will be DONE/FAILED/DETACHED
             logger.debug("Experiment %s finished (status: %s)", key, xp.status.name)
 
+    def get_carbon_totals(self, groups):
+        from experimaestro.carbon.base import CarbonAggregateData
+        from experimaestro.carbon.storage import aggregate_experiment_groups
+
+        workspaces = {
+            xp.experiment_id: xp.workspace.path for xp in self.experiments.values()
+        }
+        totals = {name: CarbonAggregateData() for name in groups}
+        for path in set(workspaces.values()):
+            in_workspace = {
+                name: [xp_id for xp_id in ids if workspaces.get(xp_id) == path]
+                for name, ids in groups.items()
+            }
+            for name, data in aggregate_experiment_groups(path, in_workspace).items():
+                total = totals[name]
+                total.co2_kg += data.co2_kg
+                total.energy_kwh += data.energy_kwh
+                total.duration_s += data.duration_s
+                total.job_count += data.job_count
+        return totals
+
     def start_server(
         self,
         settings: "ServerSettings" = None,

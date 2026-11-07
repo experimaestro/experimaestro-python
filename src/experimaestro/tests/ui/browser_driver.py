@@ -227,6 +227,17 @@ class BrowserDriver:
             tags[exp_id] = set(await row.locator(".experiment-tag").all_inner_texts())
         return tags
 
+    async def group_carbon(self) -> dict[str, float]:
+        await self.group_experiments("tag")
+        totals = {}
+        for header in await self.page.locator("tr.experiment-group-row").all():
+            carbon = header.locator(".group-carbon")
+            if await carbon.count():
+                totals[await header.get_attribute("data-group")] = float(
+                    await carbon.get_attribute("data-co2-kg")
+                )
+        return totals
+
     async def group_experiments(
         self, grouping: Literal["none", "prefix", "tag"]
     ) -> dict[str, set[str]]:

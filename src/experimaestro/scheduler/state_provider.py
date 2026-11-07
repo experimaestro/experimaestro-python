@@ -22,9 +22,10 @@ from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TYPE_CHECKING
-from collections.abc import Callable, Hashable
+from collections.abc import Callable, Collection, Hashable, Mapping
 
 if TYPE_CHECKING:
+    from experimaestro.carbon.base import CarbonAggregateData
     from experimaestro.core.serialization import ExperimentInfo
     from experimaestro.logs.source import LogSource
     from experimaestro.scheduler.state_status import (
@@ -824,6 +825,21 @@ class StateProvider(ABC):
             return None
         return FailureDetails.from_path(Path(job.path), job.scriptname)
 
+    def get_carbon_totals(
+        self, groups: Mapping[str, Collection[str]]
+    ) -> dict[str, "CarbonAggregateData"]:
+        """Carbon totals of groups of experiments: all the runs of their jobs,
+        a job shared by several experiments of a group being counted once
+
+        Args:
+            groups: Group name -> IDs of its experiments.
+
+        Returns:
+            Group name -> totals; empty when the provider cannot read the carbon
+            records (e.g. an older remote server).
+        """
+        return {}
+
     def get_last_sync_time(self) -> datetime | None:
         """Get the last sync time (for incremental updates)"""
         return None
@@ -986,6 +1002,23 @@ class OfflineStateProvider(StateProvider):
             refresh=refresh,
             copy=list,
         )
+
+    def get_carbon_totals(
+        self, groups: Mapping[str, Collection[str]]
+    ) -> dict[str, "CarbonAggregateData"]:
+        groups = {name: sorted(ids) for name, ids in groups.items()}
+        return self._cached_query(
+            ("carbon_totals", freeze(groups)),
+            lambda: self._fetch_carbon_totals(groups),
+            refresh=False,
+            copy=dict,
+        )
+
+    def _fetch_carbon_totals(
+        self, groups: Mapping[str, list[str]]
+    ) -> dict[str, "CarbonAggregateData"]:
+        """Read the carbon totals of groups of experiments from storage"""
+        return {}
 
     def get_experiment(
         self, experiment_id: str, *, refresh: bool = False
@@ -1450,6 +1483,11 @@ class OfflineStateProvider(StateProvider):
                             full_id,
                         )
                         break
+            # A carbon record was written: the totals are read from the records
+            if isinstance(event, CarbonMetricsEvent) and event.is_final:
+                self._query_cache.drop_if(
+                    lambda key, _: key[0] == "carbon_totals",
+                )
 
         # Job submissions (ExperimentJobStateEvent with
         # scheduler_state="submitted", or the legacy JobSubmittedEvent) and

@@ -1,10 +1,10 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Table, Badge, Modal, Button, Form } from "react-bootstrap";
 
 import { useAppSelector } from "./store";
 import { Experiment } from "./reducers";
 import { formatShortDate, formatDuration, formatCO2 } from "./format";
-import client from "./client";
+import client, { ExperimentsCarbonResult } from "./client";
 import { useMessages } from "./ui/messages";
 import { clearOnEscape, useShortcuts } from "./shortcuts";
 import { KeyHints, SortHeader, sortedMessage } from "./ui/sorting";
@@ -242,6 +242,49 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
     () => (grouping === "none" ? null : groupExperiments(shown, grouping)),
     [shown, grouping],
   );
+
+  // The totals are computed by the server, which knows the jobs of the
+  // experiments (they can share jobs): asked again when the groups or what the
+  // experiments have done change
+  const [groupCarbon, setGroupCarbon] = useState<ExperimentsCarbonResult["totals"]>({});
+  const carbonRequest = useRef(0);
+  const groupsKey = useMemo(
+    () =>
+      JSON.stringify(
+        (groups ?? []).map((group) => [
+          group.name,
+          group.experiments.map((exp) => [
+            exp.experiment_id,
+            exp.statusCategory,
+            exp.finished_jobs,
+            exp.carbon?.co2kg ?? 0,
+          ]),
+        ]),
+      ),
+    [groups],
+  );
+  useEffect(() => {
+    if (groups === null) {
+      setGroupCarbon({});
+      return;
+    }
+    const requestId = ++carbonRequest.current;
+    client.onExperimentsCarbon = (result) => {
+      if (result.requestId === carbonRequest.current) setGroupCarbon(result.totals);
+    };
+    client.experiments_carbon(
+      Object.fromEntries(
+        groups.map((group) => [
+          group.name,
+          group.experiments.map((exp) => exp.experiment_id),
+        ]),
+      ),
+      requestId,
+    );
+    return () => {
+      client.onExperimentsCarbon = null;
+    };
+  }, [groupsKey]);
 
   const allCollapsed =
     groups !== null && groups.length > 0 && groups.every((g) => collapsed.has(g.name));
@@ -492,6 +535,7 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
         ) : (
           groups.map((group) => {
             const isCollapsed = collapsed.has(group.name);
+            const carbon = groupCarbon[group.name];
             return (
               <tbody key={`group-${group.name}`}>
                 <tr
@@ -513,6 +557,15 @@ export default ({ onOpen }: { onOpen: (id: string) => void }) => {
                         {(STATUS_INFO[status] ?? STATUS_INFO.empty).icon} {count}
                       </span>
                     ))}
+                    {carbon && carbon.co2kg > 0 && (
+                      <span
+                        className="group-carbon ms-3 small"
+                        data-co2-kg={carbon.co2kg}
+                        title="All the runs of the experiments of this group, each job being counted once"
+                      >
+                        CO₂ {formatCO2(carbon.co2kg)}
+                      </span>
+                    )}
                   </td>
                 </tr>
                 {!isCollapsed &&

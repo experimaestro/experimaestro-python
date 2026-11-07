@@ -540,6 +540,7 @@ class WebSocketHandler:
             "job.delete": self._handle_job_delete,
             "jobs.filter": self._handle_jobs_filter,
             "jobs.complete": self._handle_jobs_complete,
+            "experiments.carbon": self._handle_experiments_carbon,
             "experiment.graph": self._handle_experiment_graph,
             "experiment.kill": self._handle_experiment_kill,
             "experiment.delete": self._handle_experiment_delete,
@@ -1002,6 +1003,38 @@ class WebSocketHandler:
             stack=bool(payload.get("stack", True)),
         )
         return {"graph": graph.state_dict(), "view": view.state_dict(graph.index())}
+
+    async def _handle_experiments_carbon(
+        self, websocket: WebSocket, payload: dict[str, Any]
+    ):
+        """Carbon totals of the groups of experiments shown by the client (the
+        grouping is done by the client; each job is counted once per group)"""
+        loop = asyncio.get_running_loop()
+        try:
+            totals = await loop.run_in_executor(
+                None,
+                self.state_provider.get_carbon_totals,
+                payload.get("groups") or {},
+            )
+        except Exception as e:
+            logger.warning("Could not read the carbon totals: %s", e)
+            totals = {}
+        await websocket.send_json(
+            {
+                "type": "experiments.carbon",
+                "payload": {
+                    "requestId": payload.get("requestId"),
+                    "totals": {
+                        name: {
+                            "co2kg": total.co2_kg,
+                            "energyKwh": total.energy_kwh,
+                            "jobCount": total.job_count,
+                        }
+                        for name, total in totals.items()
+                    },
+                },
+            }
+        )
 
     async def _handle_experiment_graph(
         self, websocket: WebSocket, payload: dict[str, Any]

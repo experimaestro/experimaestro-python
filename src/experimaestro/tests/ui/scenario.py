@@ -26,6 +26,7 @@ from experimaestro.scheduler.interfaces import (
     JobFailureStatus,
     JobState,
 )
+from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
 from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.state_status import (
     ConnectionState,
@@ -227,6 +228,16 @@ EXPERIMENTS = [
     ),
 ]
 
+#: Carbon records (job, kg of CO2): LEARN_DONE ran twice, and OLD_LEARN is from a
+#: former run
+CARBON_RECORDS = [
+    (OLD_LEARN, 1.0),
+    (LEARN_DONE, 2.0),
+    (LEARN_DONE, 0.5),
+    (LEARN_RUNNING, 4.0),
+    (ABLATION_DONE, 8.0),
+]
+
 ORPHANS = [
     JobSpec(ORPHAN_DONE, "pkg.Learn", "done"),
     JobSpec(STRAY_RUNNING, "pkg.Learn", "running"),
@@ -330,6 +341,24 @@ class ScenarioProvider(OfflineStateProvider):
             self._add_job(spec)
             self.orphans.append(spec.identifier)
         (self.jobs[ORPHAN_DONE].path / "data.bin").write_bytes(b"x" * ORPHAN_DATA_SIZE)
+
+        carbon = CarbonStorage(workspace)
+        for job_id, co2_kg in CARBON_RECORDS:
+            carbon.write_record(
+                CarbonRecord(
+                    job_id=job_id,
+                    task_id="pkg.Learn",
+                    started_at="2026-01-01T00:00:00",
+                    ended_at="2026-01-01T01:00:00",
+                    co2_kg=co2_kg,
+                    energy_kwh=co2_kg * 10,
+                    cpu_power_w=0.0,
+                    gpu_power_w=0.0,
+                    ram_power_w=0.0,
+                    duration_s=3600.0,
+                    region="FRA",
+                )
+            )
 
         runs_services = {
             (xp_id, self.runs[xp_id][-1].run_id): services
@@ -462,6 +491,19 @@ class ScenarioProvider(OfflineStateProvider):
 
     def _fetch_experiments(self, since, *, refresh=False):
         return [runs[-1] for runs in self.runs.values()]
+
+    def _fetch_carbon_totals(self, groups):
+        return CarbonStorage(self.workspace).aggregate_groups(
+            {
+                name: {
+                    job_id
+                    for xp_id in ids
+                    for run in self.runs[xp_id]
+                    for job_id in self.run_jobs[(xp_id, run.run_id)]
+                }
+                for name, ids in groups.items()
+            }
+        )
 
     def _fetch_experiment(self, experiment_id, *, refresh=False):
         return self._run(experiment_id, None)

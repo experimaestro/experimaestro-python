@@ -34,15 +34,27 @@ experiments.add_command(dag, "dag")
 
 
 @experiments.command("list")
-def list_experiments():
+@click.option(
+    "--group",
+    "-g",
+    "groups",
+    multiple=True,
+    help="Only the experiments with this experiment tag (can be repeated)",
+)
+def list_experiments(groups: tuple[str, ...]):
     """List experiments in the workspace"""
     experiments_list = root_config().state_provider().get_experiments()
+    if groups:
+        experiments_list = [
+            exp for exp in experiments_list if set(groups) & set(exp.experiment_tags)
+        ]
     if not experiments_list:
         cprint("No experiments found", "yellow")
         return
 
     for exp in experiments_list:
         display_parts = [exp.experiment_id]
+        display_parts.extend(f"#{tag}" for tag in exp.experiment_tags)
         if exp.run_id:
             display_parts.append(f"[run: {exp.run_id}]")
         if exp.hostname:
@@ -621,12 +633,19 @@ def _collect_carbon_job_ids(
     name_re,
     tags_set: set | None,
     verbose: bool,
+    groups_set: set | None = None,
 ) -> tuple[set[str], dict[str, set[str]]]:
     """Collect job IDs from experiments matching filters.
+
+    An experiment is in the groups given by the experiment tags of its current
+    run (the ones the UIs show); all its runs then count, unless restricted by
+    run tags.
 
     Returns:
         Tuple of (all_job_ids, experiment_jobs dict for verbose output)
     """
+    from experimaestro.carbon.storage import read_job_ids
+
     all_job_ids: set[str] = set()
     experiment_jobs: dict[str, set[str]] = {}
 
@@ -637,6 +656,11 @@ def _collect_carbon_job_ids(
         exp_id = exp_dir.name
         if name_re and not name_re.search(exp_id):
             continue
+
+        if groups_set:
+            status = _read_run_status(exp_dir / "current")
+            if not groups_set.intersection(status.get("experiment_tags", [])):
+                continue
 
         for run_dir in exp_dir.iterdir():
             if not run_dir.is_dir():
@@ -652,40 +676,12 @@ def _collect_carbon_job_ids(
             if not jobs_path.exists():
                 continue
 
-            _read_job_ids_from_jsonl(
-                jobs_path, exp_id, all_job_ids, experiment_jobs, verbose
-            )
+            job_ids = read_job_ids(jobs_path)
+            all_job_ids |= job_ids
+            if verbose and job_ids:
+                experiment_jobs.setdefault(exp_id, set()).update(job_ids)
 
     return all_job_ids, experiment_jobs
-
-
-def _read_job_ids_from_jsonl(
-    jobs_path: Path,
-    exp_id: str,
-    all_job_ids: set[str],
-    experiment_jobs: dict[str, set[str]],
-    verbose: bool,
-) -> None:
-    """Read job IDs from a jobs.jsonl file."""
-    import json
-
-    try:
-        with jobs_path.open() as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    job_data = json.loads(line)
-                    job_id = job_data.get("identifier") or job_data.get("job_id")
-                    if job_id:
-                        all_job_ids.add(job_id)
-                        if verbose:
-                            experiment_jobs.setdefault(exp_id, set()).add(job_id)
-                except json.JSONDecodeError:
-                    continue
-    except Exception as e:
-        logger.debug("Failed to read jobs from %s: %s", jobs_path, e)
 
 
 def _print_carbon_summary(
@@ -696,6 +692,8 @@ def _print_carbon_summary(
     latest_only: bool,
     experiment_breakdown: dict,
     verbose: bool,
+    groups: tuple = (),
+    task_breakdown: dict | None = None,
 ) -> None:
     """Pretty print carbon summary."""
     from experimaestro.carbon.utils import format_co2_kg, format_energy_kwh
@@ -703,6 +701,8 @@ def _print_carbon_summary(
     cprint("Carbon Impact Summary", "cyan", attrs=["bold"])
     cprint("-" * 50, "white")
 
+    if groups:
+        print(f"  Group: {', '.join(groups)}")
     if name_pattern:
         print(f"  Name filter: {name_pattern}")
     if tags:
@@ -730,9 +730,26 @@ def _print_carbon_summary(
             if exp_totals["job_count"] > 0:
                 exp_co2 = format_co2_kg(exp_totals["co2_kg"])
                 print(f"  {exp_id}: {exp_co2} ({exp_totals['job_count']} jobs)")
+        print("  (a job shared by several experiments is listed in each of them)")
+
+    if task_breakdown:
+        print()
+        cprint("Per-Task Breakdown:", "cyan")
+        for task_id, task_totals in sorted(
+            task_breakdown.items(), key=lambda item: -item[1]["co2_kg"]
+        ):
+            task_co2 = format_co2_kg(task_totals["co2_kg"])
+            print(f"  {task_id}: {task_co2} ({task_totals['job_count']} jobs)")
 
 
 @carbon.command("summary", cls=RemoteCommand)
+@click.option(
+    "--group",
+    "-g",
+    "groups",
+    multiple=True,
+    help="Filter experiments by experiment tag (can be repeated)",
+)
 @click.option(
     "--name",
     "-n",
@@ -755,14 +772,17 @@ def _print_carbon_summary(
 )
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.option("--verbose", "-v", is_flag=True, help="Show per-experiment breakdown")
+@click.option("--by-task", is_flag=True, help="Show per-task breakdown")
 @pass_workdir
 def carbon_summary(
     workdir: Path,
+    groups: tuple,
     name_pattern: str | None,
     tags: tuple,
     latest_only: bool,
     as_json: bool,
     verbose: bool,
+    by_task: bool,
 ):
     """Aggregate CO2 emissions across experiments
 
@@ -772,6 +792,10 @@ def carbon_summary(
     Examples:
         # Total CO2 for all experiments
         experimaestro experiments carbon summary
+
+        # A group of experiments (those with `tags: [project-x]` in their YAML),
+        # with the details per experiment and per task
+        experimaestro experiments carbon summary --group project-x -v --by-task
 
         # Filter by experiment name pattern
         experimaestro experiments carbon summary --name "^train-.*"
@@ -799,7 +823,7 @@ def carbon_summary(
     tags_set = set(tags) if tags else None
 
     all_job_ids, experiment_jobs = _collect_carbon_job_ids(
-        experiments_dir, name_re, tags_set, verbose
+        experiments_dir, name_re, tags_set, verbose, set(groups) or None
     )
 
     if not all_job_ids:
@@ -816,10 +840,17 @@ def carbon_summary(
                 job_ids, use_latest_only=latest_only
             )
 
+    task_breakdown = (
+        storage.aggregate_by_task(all_job_ids, use_latest_only=latest_only)
+        if by_task
+        else None
+    )
+
     if as_json:
         output = {
             "totals": totals,
             "filters": {
+                "groups": list(groups),
                 "name_pattern": name_pattern,
                 "tags": list(tags),
                 "latest_only": latest_only,
@@ -828,6 +859,8 @@ def carbon_summary(
         }
         if verbose:
             output["experiments"] = experiment_breakdown
+        if by_task:
+            output["tasks"] = task_breakdown
         print(json.dumps(output, indent=2))
         return
 
@@ -839,6 +872,8 @@ def carbon_summary(
         latest_only,
         experiment_breakdown,
         verbose,
+        groups,
+        task_breakdown,
     )
 
 

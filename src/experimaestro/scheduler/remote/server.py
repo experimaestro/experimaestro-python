@@ -119,6 +119,7 @@ class SSHStateProviderServer:
             RPCMethod.READ_FILE.value: self._handle_read_file,
             RPCMethod.READ_LOG.value: self._handle_read_log,
             RPCMethod.GET_FAILURE_DETAILS.value: self._handle_get_failure_details,
+            RPCMethod.GET_CARBON_TOTALS.value: self._handle_get_carbon_totals,
         }
 
     def start(self):
@@ -585,6 +586,14 @@ class SSHStateProviderServer:
             return None
         details = self._state_provider.get_failure_details(job)
         return details.state_dict() if details is not None else None
+
+    def _handle_get_carbon_totals(self, params: dict) -> dict[str, dict]:
+        """Handle get_carbon_totals request"""
+        groups = params.get("groups")
+        if groups is None:
+            raise TypeError("groups is required")
+        totals = self._state_provider.get_carbon_totals(groups)
+        return {name: total.to_dict() for name, total in totals.items()}
 
     def _handle_execute_warning_action(self, params: dict) -> None:
         """Handle execute_warning_action request"""

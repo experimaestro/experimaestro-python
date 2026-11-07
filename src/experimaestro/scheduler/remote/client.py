@@ -1834,6 +1834,18 @@ class SSHStateProviderClient(OfflineStateProvider):
         )
         return FailureDetails.from_state_dict(result) if result else None
 
+    def _fetch_carbon_totals(self, groups):
+        """Carbon totals, computed by the remote server (nothing with older
+        servers, which do not handle get_carbon_totals)"""
+        from experimaestro.carbon.base import CarbonAggregateData
+
+        if not self.supports(RPCMethod.GET_CARBON_TOTALS):
+            return {}
+        result = self._call_sync(RPCMethod.GET_CARBON_TOTALS, {"groups": groups})
+        return {
+            name: CarbonAggregateData.from_dict(total) for name, total in result.items()
+        }
+
     def execute_warning_action(
         self,
         warning_key: str,

@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from experimaestro.carbon.base import CarbonAggregateData
 from experimaestro.locking import create_file_lock
 from experimaestro.utils.atomic import atomic_write_json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,75 @@ class CarbonStorage:
             "job_count": job_count,
         }
 
+    def aggregate_by_task(
+        self,
+        job_ids: set[str],
+        *,
+        use_latest_only: bool = False,
+    ) -> dict[str, dict]:
+        """Aggregate carbon metrics per task type.
+
+        Args:
+            job_ids: Set of job IDs to aggregate.
+            use_latest_only: If True, only use the latest record per job.
+                            If False, sum all records (including retries).
+
+        Returns:
+            Task identifier -> metrics (same keys as :meth:`aggregate_for_jobs`).
+        """
+        records: Iterable[CarbonRecord] = self.read_records(job_ids=job_ids)
+        if use_latest_only:
+            latest: dict[str, CarbonRecord] = {}
+            for record in records:
+                current = latest.get(record.job_id)
+                if current is None or record.ended_at > current.ended_at:
+                    latest[record.job_id] = record
+            records = latest.values()
+
+        totals: dict[str, CarbonAggregateData] = {}
+        jobs: dict[str, set[str]] = {}
+        for record in records:
+            total = totals.setdefault(record.task_id, CarbonAggregateData())
+            total.co2_kg += record.co2_kg
+            total.energy_kwh += record.energy_kwh
+            total.duration_s += record.duration_s
+            jobs.setdefault(record.task_id, set()).add(record.job_id)
+        for task_id, total in totals.items():
+            total.job_count = len(jobs[task_id])
+        return {task_id: total.to_dict() for task_id, total in totals.items()}
+
+    def aggregate_groups(
+        self, job_ids_by_group: Mapping[str, set[str]]
+    ) -> dict[str, CarbonAggregateData]:
+        """Aggregate all the records of several sets of jobs, in one read
+
+        Within a group, a job contributes all its runs and is counted once
+        however many experiments share it; the groups themselves can overlap.
+
+        Args:
+            job_ids_by_group: Group name -> IDs of its jobs.
+
+        Returns:
+            Group name -> metrics, for every group (zeros without any record).
+        """
+        groups_of_job: dict[str, list[str]] = {}
+        for name, job_ids in job_ids_by_group.items():
+            for job_id in job_ids:
+                groups_of_job.setdefault(job_id, []).append(name)
+
+        totals = {name: CarbonAggregateData() for name in job_ids_by_group}
+        jobs: dict[str, set[str]] = {name: set() for name in job_ids_by_group}
+        for record in self.read_records(job_ids=set(groups_of_job)):
+            for name in groups_of_job[record.job_id]:
+                total = totals[name]
+                total.co2_kg += record.co2_kg
+                total.energy_kwh += record.energy_kwh
+                total.duration_s += record.duration_s
+                jobs[name].add(record.job_id)
+        for name, total in totals.items():
+            total.job_count = len(jobs[name])
+        return totals
+
     def get_stats(self) -> dict:
         """Get storage statistics.
 
@@ -398,3 +468,57 @@ class CarbonStorage:
             "file_count": file_count,
             "size_bytes": total_size,
         }
+
+
+def read_job_ids(jobs_path: Path) -> set[str]:
+    """IDs of the jobs listed in the ``jobs.jsonl`` file of a run"""
+    job_ids: set[str] = set()
+    try:
+        with jobs_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                job_id = data.get("identifier") or data.get("job_id")
+                if job_id:
+                    job_ids.add(job_id)
+    except OSError as e:
+        logger.debug("Failed to read jobs from %s: %s", jobs_path, e)
+    return job_ids
+
+
+def experiment_job_ids(workspace_path: Path, experiment_id: str) -> set[str]:
+    """IDs of the jobs of all the runs of an experiment"""
+    job_ids: set[str] = set()
+    experiment_dir = Path(workspace_path) / "experiments" / experiment_id
+    for jobs_path in experiment_dir.glob("*/jobs.jsonl"):
+        job_ids |= read_job_ids(jobs_path)
+    return job_ids
+
+
+def aggregate_experiment_groups(
+    workspace_path: Path, groups: Mapping[str, Iterable[str]]
+) -> dict[str, CarbonAggregateData]:
+    """Carbon totals of groups of experiments of a workspace (see
+    :meth:`CarbonStorage.aggregate_groups`)
+
+    Args:
+        workspace_path: The workspace directory.
+        groups: Group name -> IDs of its experiments.
+    """
+    job_ids_of: dict[str, set[str]] = {}
+    job_ids_by_group: dict[str, set[str]] = {}
+    for name, experiment_ids in groups.items():
+        job_ids: set[str] = set()
+        for experiment_id in experiment_ids:
+            if experiment_id not in job_ids_of:
+                job_ids_of[experiment_id] = experiment_job_ids(
+                    workspace_path, experiment_id
+                )
+            job_ids |= job_ids_of[experiment_id]
+        job_ids_by_group[name] = job_ids
+    return CarbonStorage(workspace_path).aggregate_groups(job_ids_by_group)

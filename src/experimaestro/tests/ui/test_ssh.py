@@ -21,6 +21,7 @@ import psutil
 import pytest
 
 from experimaestro import Param, Task
+from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
 from experimaestro.scheduler.interfaces import FailureDetails
 from experimaestro.scheduler.state_status import ConnectionState, ConnectionStateEvent
 from experimaestro.settings import ReconnectSettings
@@ -320,6 +321,35 @@ def test_failure_details(ssh_provider, old_ssh_provider, remote_workspace):
         assert old_ssh_provider.get_failure_details(old_job) is None
     finally:
         marker.unlink()
+
+
+def test_carbon_totals(ssh_provider, old_ssh_provider, remote_workspace):
+    """The carbon totals are computed by the remote server (not with older ones,
+    which do not handle get_carbon_totals)"""
+    alice = remote_workspace.jobs["alice"]
+    storage = CarbonStorage(remote_workspace.path)
+    storage.write_record(
+        CarbonRecord(
+            job_id=alice,
+            task_id="pkg.Greet",
+            started_at="2026-01-01T00:00:00",
+            ended_at="2026-01-01T01:00:00",
+            co2_kg=1.5,
+            energy_kwh=15.0,
+            cpu_power_w=0.0,
+            gpu_power_w=0.0,
+            ram_power_w=0.0,
+            duration_s=3600.0,
+            region="FRA",
+        )
+    )
+    expected = storage.aggregate_for_jobs(set(remote_workspace.jobs.values()))
+    totals = ssh_provider.get_carbon_totals({"group": ["greetings"]})
+    assert totals["group"].co2_kg == pytest.approx(expected["co2_kg"])
+    assert totals["group"].co2_kg >= 1.5
+
+    assert not old_ssh_provider.supports(RPCMethod.GET_CARBON_TOTALS)
+    assert old_ssh_provider.get_carbon_totals({"group": ["greetings"]}) == {}
 
 
 def test_old_remote(old_ssh_provider):

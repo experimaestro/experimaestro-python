@@ -2055,6 +2055,11 @@ class WorkspaceStateProvider(OfflineStateProvider):
     # Orphan job detection
     # =========================================================================
 
+    def _fetch_carbon_totals(self, groups):
+        from experimaestro.carbon.storage import aggregate_experiment_groups
+
+        return aggregate_experiment_groups(self.workspace_path, groups)
+
     def _fetch_orphan_jobs(
         self, *, refresh: bool = False, include_folders: bool = True
     ) -> list[MockJob]:

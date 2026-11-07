@@ -19,6 +19,7 @@ from typing import Any, Literal
 from starlette.testclient import TestClient
 
 from experimaestro.scheduler.state_provider import StateProvider
+from experimaestro.ui.experiments import UNTAGGED
 from experimaestro.webui.app import create_app
 
 from .drivers import (
@@ -225,6 +226,21 @@ class WebDriver:
         self, grouping: Literal["none", "prefix", "tag"]
     ) -> dict[str, set[str]]:
         raise NotImplementedError("grouping is done by the browser client")
+
+    async def group_carbon(self) -> dict[str, float]:
+        # As the client does once it has grouped the experiments by tag
+        await self._request("experiments")
+        groups: dict[str, list[str]] = {}
+        for xp_id, payload in self.experiment_list.items():
+            for tag in payload["tags"] or [UNTAGGED]:
+                groups.setdefault(tag, []).append(xp_id)
+        messages = await self._request("experiments.carbon", requestId=1, groups=groups)
+        answer = next(m for m in messages if m["type"] == "experiments.carbon")
+        return {
+            name: total["co2kg"]
+            for name, total in answer["payload"]["totals"].items()
+            if total["co2kg"] > 0
+        }
 
     async def job_order(self) -> list[str]:
         raise NotImplementedError("job order is set by the browser client")

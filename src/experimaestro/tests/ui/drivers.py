@@ -138,6 +138,11 @@ class UIDriver(Protocol):
         single group named "" when not grouped)"""
         ...
 
+    async def group_carbon(self) -> dict[str, float]:
+        """CO2 total (in kg) shown for each group when grouping the experiments
+        by tag (groups without any total are left out)"""
+        ...
+
     async def runs(self, experiment_id: str) -> list[str]:
         """Runs of an experiment, as listed in the run history"""
         ...

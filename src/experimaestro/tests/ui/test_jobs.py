@@ -120,6 +120,15 @@ async def test_experiment_grouping(ui):
     assert await ui.group_experiments("none") == {"": {"baseline", "sweep", "ablation"}}
 
 
+async def test_group_carbon(ui):
+    """The header of a group shows the CO2 of all the runs of its experiments"""
+    assert await ui.group_carbon() == {
+        "bm25": 3.5,
+        "paper": 7.5,
+        "(untagged)": 8.0,
+    }
+
+
 async def test_jobs_of_current_run(ui):
     await ui.open_experiment("baseline")
     assert await ui.visible_jobs() == {LEARN_DONE, LEARN_ERROR, EVAL_DONE}

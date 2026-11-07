@@ -22,6 +22,7 @@ from textual.widgets import (
     Tree,
 )
 
+from experimaestro.carbon.utils import format_co2_kg
 from experimaestro.scheduler.state_provider import StateProvider
 import experimaestro.tui.app
 from experimaestro.tui.app import ExperimaestroUI
@@ -188,6 +189,18 @@ class TuiDriver:
             ).plain.split()
             tags[exp_id] = {word[1:] for word in words if word.startswith("#")}
         return tags
+
+    async def group_carbon(self) -> dict[str, float]:
+        await self.group_experiments("tag")
+        widget = self.app.query_one(ExperimentsList)
+        table = self._table("#experiments-table")
+        totals = {}
+        for name, total in widget._group_carbon.items():
+            if total.co2_kg > 0:
+                # Shown in the CO2 column of the header of the group
+                assert table.get_row(f"\0{name}")[-1] == format_co2_kg(total.co2_kg)
+                totals[name] = total.co2_kg
+        return totals
 
     async def group_experiments(
         self, grouping: Literal["none", "prefix", "tag"]

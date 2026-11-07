@@ -10,6 +10,13 @@ interface Message {
   payload?: any;
 }
 
+// Answer to an "experiments.carbon" request: totals per group of experiments,
+// each job being counted once
+export type ExperimentsCarbonResult = {
+  requestId: number;
+  totals: { [group: string]: { co2kg: number; energyKwh: number; jobCount: number } };
+};
+
 // Answer to a "jobs.filter" request (filter DSL evaluated server-side)
 export type JobsFilterResult = {
   requestId: number;
@@ -55,6 +62,8 @@ class Client {
   onActionResult: ((payload: any) => void) | null = null;
   // Callback for server-side job filter results (set by the Tasks view)
   onJobsFilter: ((payload: JobsFilterResult) => void) | null = null;
+  // Callback for the carbon totals of experiment groups (set by the list)
+  onExperimentsCarbon: ((payload: ExperimentsCarbonResult) => void) | null = null;
   // Callback for the completions of the filter (set by the filter input)
   onJobsComplete: ((payload: JobsCompleteResult) => void) | null = null;
   // Callback for experiment graph results (set by the graph view)
@@ -208,6 +217,9 @@ class Client {
         case "action.result":
           if (this.onActionResult) this.onActionResult(payload);
           break;
+        case "experiments.carbon":
+          if (this.onExperimentsCarbon) this.onExperimentsCarbon(payload);
+          break;
         case "jobs.filter":
           if (this.onJobsFilter) this.onJobsFilter(payload);
           break;
@@ -287,6 +299,10 @@ class Client {
 
   job_delete(jobId: string, taskId?: string): void {
     this.send("job.delete", { jobId, taskId });
+  }
+
+  experiments_carbon(groups: { [group: string]: string[] }, requestId: number): void {
+    this.send("experiments.carbon", { groups, requestId });
   }
 
   jobs_filter(

@@ -107,6 +107,7 @@ class RPCMethod(str, Enum):
     READ_FILE = "read_file"
     READ_LOG = "read_log"
     GET_FAILURE_DETAILS = "get_failure_details"
+    GET_CARBON_TOTALS = "get_carbon_totals"
 
 
 #: Methods handled by the servers that do not list theirs (experimaestro 2.7.0)

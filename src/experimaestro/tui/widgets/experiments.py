@@ -18,6 +18,7 @@ from experimaestro.tui.messages import (
     KillExperimentRequest,
     ShowRunsRequest,
 )
+from experimaestro.carbon.base import CarbonAggregateData
 from experimaestro.carbon.utils import format_co2_kg
 from experimaestro.ui.experiments import (
     EXPERIMENT_GROUPINGS,
@@ -92,6 +93,8 @@ class ExperimentsList(Widget):
         self.grouping: ExperimentGrouping = "none"
         #: Names of the collapsed groups
         self.collapsed_groups: set[str] = set()
+        #: Carbon totals of the groups shown (each job counted once)
+        self._group_carbon: dict[str, CarbonAggregateData] = {}
         #: Experiment of each row (None for a group header): rows are keyed by
         #: the experiment ID, or by group and experiment ID when grouped (an
         #: experiment can be in several groups); group headers by "\0" + name
@@ -411,6 +414,23 @@ class ExperimentsList(Widget):
 
         self.app.call_from_thread(self._on_experiments_loaded, experiments, runs_counts)
 
+    @work(thread=True, exclusive=True, group="group_carbon")
+    def _load_group_carbon(self, groups: dict[str, list[str]]) -> None:
+        """Load the carbon totals of the groups in background thread (the
+        provider caches them: this only costs a read when they changed)"""
+        try:
+            totals = self.state_provider.get_carbon_totals(groups)
+        except Exception as e:
+            self.log.error(f"Error getting the carbon totals: {e}")
+            return
+        self.app.call_from_thread(self._on_group_carbon_loaded, totals)
+
+    def _on_group_carbon_loaded(self, totals: dict[str, CarbonAggregateData]) -> None:
+        """Show the carbon totals of the groups on main thread"""
+        if totals != self._group_carbon:
+            self._group_carbon = totals
+            self._show_experiments()
+
     def _on_experiments_loaded(
         self, experiments: list, runs_counts: dict[str, str]
     ) -> None:
@@ -477,6 +497,8 @@ class ExperimentsList(Widget):
         counts: dict[str, int] = {}
         for exp in experiments:
             counts[exp.status_category] = counts.get(exp.status_category, 0) + 1
+        carbon = self._group_carbon.get(name)
+        co2_text = format_co2_kg(carbon.co2_kg) if carbon and carbon.co2_kg > 0 else ""
         summary = " ".join(
             f"{STATUS_ICONS.get(status, '∅')}{count}"
             for status, count in sorted(
@@ -491,7 +513,7 @@ class ExperimentsList(Widget):
             summary,
             "",
             "",
-            "",
+            co2_text,
         )
 
     def _show_experiments(self) -> None:
@@ -517,7 +539,11 @@ class ExperimentsList(Widget):
                 exp_id = exp.experiment_id
                 rows.append((exp_id, exp_id, self._experiment_row(exp)))
         else:
-            for name, group in group_experiments(experiments_sorted, self.grouping):
+            groups = group_experiments(experiments_sorted, self.grouping)
+            self._load_group_carbon(
+                {name: [xp.experiment_id for xp in xps] for name, xps in groups}
+            )
+            for name, group in groups:
                 rows.append((f"\0{name}", None, self._group_row(name, group)))
                 if name in self.collapsed_groups:
                     continue
