@@ -159,14 +159,23 @@ them as estimates.
 (apple-silicon)=
 ### Apple Silicon
 
-Tracking on Apple Silicon is **experimental, and can largely undercount**:
+Tracking on Apple Silicon is **experimental, and unreliable on macOS 27**:
 
 - The figures come from counters of the whole chip, so they also include what else
   the machine is doing.
-- On an M4 Max with macOS 27.2 on battery, these counters did not change under CPU
-  load, except the GPU one: a job using the CPU was recorded with
-  `cpu_power_w: 0` and almost no energy. Look at this value in
-  `carbon/measures-*.jsonl` before relying on the results.
+- **macOS 27 freezes most of these counters.** Other tools reading them report the
+  same problem, from M1 to M5
+  ([macmon](https://github.com/vladkens/macmon/issues/76),
+  [Stats](https://github.com/exelban/stats/issues/3621)). On an M4 Max with
+  macOS 27.2, the CPU and memory counters did not change under CPU load, on battery
+  or on AC power, and also not when reading them as root, although `powermetrics`
+  reported the power used by the CPU. Only the GPU counter moved, and not in every
+  run: a job using the CPU was recorded with `cpu_power_w: 0` and almost no energy.
+- **The figures can be too low or too high.** Besides the missing CPU energy, these
+  reports describe frozen counters that occasionally jump by all the energy
+  accumulated in the meantime, which would be added to the jobs running at that
+  moment. Look at `cpu_power_w` in `carbon/measures-*.jsonl` before relying on the
+  results.
 - The country is not detected: without `country_iso_code`, a world average of
   450 g of CO₂ per kWh is used, as for a country not known to the tracker.
 - Installing `zeus[apple]` builds `scipy` if it has no wheels for your Python
