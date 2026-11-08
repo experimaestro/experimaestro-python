@@ -227,6 +227,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                     on_created=self._on_experiment_events_created,
                     on_event=self._on_experiment_event,
                     on_deleted=self._on_experiment_events_deleted,
+                    on_directory_changed=self._on_experiment_events_dir_changed,
                 ),
                 WatchedDirectory(
                     path=self._jobs_dir,
@@ -768,6 +769,44 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         Clears experiment cache (forces reload from consolidated status.json).
         """
+        self._reload_experiment(experiment_id)
+
+    def _on_experiment_events_dir_changed(self) -> None:
+        """Experiment event files were created or deleted
+
+        When polling, a run whose event file is created and deleted between
+        two polls (e.g. a relaunch whose jobs are all done) gives no other
+        notice: checks the current run of the experiments in cache, and looks
+        for new experiments.
+        """
+        with self._experiment_cache_lock:
+            cached = {experiment_id for experiment_id, _ in self._experiment_cache}
+        changed = {
+            experiment_id
+            for experiment_id in cached
+            if self._fetch_current_run(experiment_id)
+            != self.get_current_run(experiment_id)
+        }
+
+        with self._known_experiment_ids_lock:
+            known = self._known_experiment_ids
+        if known is not None:
+            try:
+                names = {
+                    path.name
+                    for path in (self.workspace_path / "experiments").iterdir()
+                    if path.is_dir()
+                }
+            except OSError:
+                names = set()
+            changed |= names - known[0]
+
+        for experiment_id in changed:
+            logger.debug("New run of %s found (missed events)", experiment_id)
+            self._reload_experiment(experiment_id)
+
+    def _reload_experiment(self, experiment_id: str) -> None:
+        """Drops what is cached about an experiment, and notifies listeners"""
         self._invalidate_known_experiment_ids()
         self._clear_experiment_cache(experiment_id)
         run_id = self.get_current_run(experiment_id) or ""

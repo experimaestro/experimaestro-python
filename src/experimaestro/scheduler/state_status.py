@@ -1199,6 +1199,9 @@ class WatchedDirectory:
             are followed.
         on_event: Callback for each event (entity_id, event).
         on_deleted: Callback when entity's event files are deleted.
+        on_directory_changed: Callback when the files of the directory change
+            (created or deleted), including files created and deleted between
+            two polls -- for which no other callback is called.
     """
 
     path: Path
@@ -1215,6 +1218,7 @@ class WatchedDirectory:
     on_created: Callable[[str, list[EventBase]], bool] | None = None
     on_event: Callable[[str, EventBase], None] | None = None
     on_deleted: Callable[[str], None] | None = None
+    on_directory_changed: Callable[[], None] | None = None
 
 
 class EventReader:
@@ -1536,6 +1540,7 @@ class EventReader:
             recursive=True,
             on_change=self._process_file_change,
             on_deleted=self._on_file_deleted,
+            on_dir_changed=first_dir.on_directory_changed,
             file_filter=self._is_event_file,
             on_created=self._on_file_created,
             enable_tailing=True,
@@ -1553,6 +1558,7 @@ class EventReader:
                 recursive=True,
                 on_change=self._process_file_change,
                 on_deleted=self._on_file_deleted,
+                on_dir_changed=dir_config.on_directory_changed,
                 file_filter=self._is_event_file,
                 on_created=self._on_file_created,
                 enable_tailing=True,

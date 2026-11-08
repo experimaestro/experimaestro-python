@@ -359,6 +359,7 @@ class PolledFile:
 
 FileChangeCallback = Callable[[Path], None]
 FileDeletedCallback = Callable[[Path], None]
+DirChangedCallback = Callable[[], None]
 FileFilter = Callable[[Path], bool]
 
 #: Builds a ChangeSource for a DirectoryWatch. Passing these explicitly
@@ -621,8 +622,8 @@ class WatchdogSource(ChangeSource):
         if watch is None:
             return
         self._handler = _WatchdogSourceHandler(self)
-        self._observed = watch._service._observer.schedule(
-            self._handler, str(watch._path.absolute()), recursive=watch._recursive
+        self._observed = watch._service._schedule(
+            self._handler, watch._path, watch._recursive
         )
         logger.debug(
             "WatchdogSource: watching %s (recursive=%s)", watch._path, watch._recursive
@@ -633,10 +634,10 @@ class WatchdogSource(ChangeSource):
         if self._observed is None:
             return
         watch = self._watch_ref()
-        if watch is not None:
+        if watch is not None and self._handler is not None:
             # Deferred to the poll thread to avoid a finalizer deadlock on the
             # watchdog observer lock (see _defer_unschedule).
-            watch._service._defer_unschedule(self._observed)
+            watch._service._defer_unschedule(self._observed, self._handler)
         self._observed = None
 
 
@@ -662,6 +663,11 @@ class _WatchdogSourceHandler(FileSystemEventHandler):
         return self._source, watch, path
 
     def on_modified(self, event):
+        if event.is_directory:
+            watch = self._source._watch
+            if watch is not None and Path(event.src_path) == watch._path.absolute():
+                watch._source_dir_changed()
+            return
         resolved = self._resolve(event)
         if resolved is not None:
             source, watch, path = resolved
@@ -877,6 +883,7 @@ class KqueueSource(ChangeSource):
                 if event.ident == self._dir_fd:
                     for path in watch._scan_directory():
                         watch._source_created(self, path)
+                    watch._source_dir_changed()
                     continue
 
                 with self._lock:
@@ -908,6 +915,8 @@ class PollSource(ChangeSource):
         super().__init__(watch)
         self.files: dict[Path, PolledFile] = {}
         self.lock = threading.Lock()
+        # Modification time of the watched directory (see _check_dir_mtime)
+        self._dir_mtime = self._read_dir_mtime(watch)
 
         # Directory scanning poller: detects new files when an event source
         # misses creations (e.g. NFS, GPFS, Lustre).
@@ -961,6 +970,7 @@ class PollSource(ChangeSource):
         next_wake = now + 1.0
 
         if self.dir_poller.is_due:
+            self._check_dir_mtime(watch)
             self._scan_for_new_files(watch)
         if self.dir_poller.next_poll < next_wake:
             next_wake = self.dir_poller.next_poll
@@ -983,6 +993,24 @@ class PollSource(ChangeSource):
                 next_wake = polled.next_poll
 
         return max(0.1, next_wake - time.time())
+
+    @staticmethod
+    def _read_dir_mtime(watch: DirectoryWatch) -> int | None:
+        try:
+            return watch._path.stat().st_mtime_ns
+        except OSError:
+            return None
+
+    def _check_dir_mtime(self, watch: DirectoryWatch) -> None:
+        """Reports a change of the directory's entries
+
+        Covers files created and deleted between two polls, which neither the
+        scan nor a polling event source sees.
+        """
+        mtime = self._read_dir_mtime(watch)
+        if mtime != self._dir_mtime:
+            self._dir_mtime = mtime
+            watch._source_dir_changed()
 
     def _scan_for_new_files(self, watch: DirectoryWatch) -> None:
         """Discover files an event source failed to report as created.
@@ -1032,6 +1060,7 @@ class DirectoryWatch:
         on_change: FileChangeCallback | None = None,
         on_created: FileChangeCallback | None = None,
         on_deleted: FileDeletedCallback | None = None,
+        on_dir_changed: DirChangedCallback | None = None,
         min_poll_interval: float = 0.5,
         max_poll_interval: float = 30.0,
         hot_poll_interval: float = 0.2,
@@ -1052,6 +1081,7 @@ class DirectoryWatch:
         self._on_change = on_change
         self._on_created = on_created
         self._on_deleted = on_deleted
+        self._on_dir_changed = on_dir_changed
         self._min_poll_interval = min_poll_interval
         self._max_poll_interval = max_poll_interval
         self._hot_window = hot_window
@@ -1180,6 +1210,19 @@ class DirectoryWatch:
 
         self.add_file(path)
         self._source_changed(source, path)
+
+    def _source_dir_changed(self) -> None:
+        """A source reports that the entries of the directory changed
+
+        Lets the user catch files created and deleted too quickly for any
+        file event (polling).
+        """
+        if self._closed or self._on_dir_changed is None:
+            return
+        try:
+            self._on_dir_changed()
+        except Exception:
+            logger.exception("Error in directory changed callback for %s", self._path)
 
     def _source_deleted(self, source: ChangeSource, path: Path) -> None:
         """A source reports that `path` was deleted."""
@@ -1333,10 +1376,12 @@ class AsyncWatch:
         self,
         service: FileWatcherService,
         watch: ObservedWatch,
+        handler: FileSystemEventHandler,
         unregister: Callable[[], None],
     ):
         self._service = service
         self._watch = watch
+        self._handler = handler
         self._unregister = unregister
         self._closed = False
 
@@ -1349,7 +1394,7 @@ class AsyncWatch:
         self._unregister()
         # Deferred to the poll thread to avoid a finalizer deadlock on the
         # watchdog observer lock (see _defer_unschedule).
-        self._service._defer_unschedule(self._watch)
+        self._service._defer_unschedule(self._watch, self._handler)
 
     def __enter__(self):
         return self
@@ -1565,7 +1610,14 @@ class FileWatcherService:
 
         # Watchdog watches queued for unscheduling by the poll thread.
         # See _defer_unschedule for why this indirection exists.
-        self._pending_unschedule: list[ObservedWatch] = []
+        self._pending_unschedule: list[
+            tuple[ObservedWatch, FileSystemEventHandler]
+        ] = []
+        # Number of handlers of each watchdog watch: watchdog merges the
+        # schedules of a same path into one watch, and unschedule() removes
+        # all its handlers -- closing one watcher would blind the others
+        self._watch_handlers: dict[ObservedWatch, int] = {}
+        self._watch_handlers_lock = threading.Lock()
         # Reentrant: _defer_unschedule may run from a finalizer triggered
         # while _drain_pending_unschedule holds the lock
         self._pending_lock = threading.RLock()
@@ -1586,7 +1638,37 @@ class FileWatcherService:
         )
         self._poll_thread.start()
 
-    def _defer_unschedule(self, watch: ObservedWatch) -> None:
+    def _schedule(
+        self, handler: FileSystemEventHandler, path: Path, recursive: bool
+    ) -> ObservedWatch:
+        """Schedules a watchdog handler (see _unschedule)"""
+        with self._watch_handlers_lock:
+            watch = self._observer.schedule(
+                handler, str(path.absolute()), recursive=recursive
+            )
+            self._watch_handlers[watch] = self._watch_handlers.get(watch, 0) + 1
+        return watch
+
+    def _unschedule(
+        self, watch: ObservedWatch, handler: FileSystemEventHandler
+    ) -> None:
+        """Removes a handler scheduled by _schedule
+
+        The watch itself is unscheduled with its last handler: other
+        watchers of the same path keep receiving the events.
+        """
+        with self._watch_handlers_lock:
+            remaining = self._watch_handlers.get(watch, 0) - 1
+            if remaining > 0:
+                self._watch_handlers[watch] = remaining
+                self._observer.remove_handler_for_watch(handler, watch)
+            else:
+                self._watch_handlers.pop(watch, None)
+                self._observer.unschedule(watch)
+
+    def _defer_unschedule(
+        self, watch: ObservedWatch, handler: FileSystemEventHandler
+    ) -> None:
         """Queue a watchdog watch to be unscheduled by the poll thread.
 
         Called from close()/__del__ paths. Calling observer.unschedule()
@@ -1597,7 +1679,7 @@ class FileWatcherService:
         out of finalizer contexts and breaks the cycle.
         """
         with self._pending_lock:
-            self._pending_unschedule.append(watch)
+            self._pending_unschedule.append((watch, handler))
 
     def _drain_pending_unschedule(self) -> None:
         """Unschedule watches queued via _defer_unschedule."""
@@ -1606,9 +1688,9 @@ class FileWatcherService:
                 return
             pending = self._pending_unschedule
             self._pending_unschedule = []
-        for watch in pending:
+        for watch, handler in pending:
             try:
-                self._observer.unschedule(watch)
+                self._unschedule(watch, handler)
             except Exception:
                 pass
 
@@ -1678,6 +1760,7 @@ class FileWatcherService:
         on_change: FileChangeCallback | None = None,
         on_created: FileChangeCallback | None = None,
         on_deleted: FileDeletedCallback | None = None,
+        on_dir_changed: DirChangedCallback | None = None,
         min_poll_interval: float = 0.5,
         max_poll_interval: float = 30.0,
         hot_poll_interval: float = 0.2,
@@ -1689,6 +1772,9 @@ class FileWatcherService:
         """Create a DirectoryWatch for the given path.
 
         Args:
+            on_dir_changed: Called when the entries of the directory (not
+                recursively) change -- even for files created and deleted
+                between two polls, which no other callback reports.
             enable_tailing: If True, enable file tailing via TailedFilePool.
                 Use read_new_lines() to read complete lines from watched files.
             hot_poll_interval: Ceiling on the poll interval for a file that
@@ -1713,6 +1799,7 @@ class FileWatcherService:
             on_change=on_change,
             on_created=on_created,
             on_deleted=on_deleted,
+            on_dir_changed=on_dir_changed,
             min_poll_interval=min_poll_interval,
             max_poll_interval=max_poll_interval,
             hot_poll_interval=hot_poll_interval,
@@ -1762,11 +1849,9 @@ class FileWatcherService:
 
         fs_handler = AsyncFileSystemEventHandler(path, bridge)
 
-        watch = self._observer.schedule(
-            fs_handler, str(path.absolute()), recursive=recursive
-        )
+        watch = self._schedule(fs_handler, path, recursive)
 
-        return AsyncWatch(self, watch, unregister)
+        return AsyncWatch(self, watch, fs_handler, unregister)
 
     def fswatch(
         self, watcher: FileSystemEventHandler, path: Path, recursive: bool = False
@@ -1774,13 +1859,11 @@ class FileWatcherService:
         """Low-level watchdog schedule. For callers that manage their own handler."""
         if not self._observer.is_alive():
             logger.error("Observer is not alive")
-        return self._observer.schedule(
-            watcher, str(path.absolute()), recursive=recursive
-        )
+        return self._schedule(watcher, path, recursive)
 
-    def fsunwatch(self, watch: ObservedWatch) -> None:
-        """Low-level watchdog unschedule."""
-        self._observer.unschedule(watch)
+    def fsunwatch(self, watch: ObservedWatch, watcher: FileSystemEventHandler) -> None:
+        """Low-level watchdog unschedule (of the handler given to fswatch)"""
+        self._unschedule(watch, watcher)
 
 
 # =============================================================================

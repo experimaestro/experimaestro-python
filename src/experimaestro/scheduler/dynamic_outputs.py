@@ -172,7 +172,7 @@ class TaskOutputsReader(FileSystemEventHandler):
         """Stop watching the file"""
         if self._watch is not None:
             try:
-                FileWatcherService.instance().fsunwatch(self._watch)
+                FileWatcherService.instance().fsunwatch(self._watch, self)
             except KeyError:
                 pass  # Already unwatched
             self._watch = None

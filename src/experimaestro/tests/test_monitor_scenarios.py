@@ -242,7 +242,13 @@ class Scenario:
 
         target = {"kept open": expected, "started now": expected}
         try:
-            wait_for(lambda: views() == target, what=what, interval=0.1)
+            # Shorter than the test timeout, so that a failure shows the views
+            wait_for(
+                lambda: views() == target,
+                what=what,
+                timeout=get_test_timeout(3),
+                interval=0.1,
+            )
         except AssertionError:
             pass
         assert views() == target, what

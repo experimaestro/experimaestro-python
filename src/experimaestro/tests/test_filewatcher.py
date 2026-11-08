@@ -25,6 +25,8 @@ from experimaestro.filewatcher import (
     WatcherType,
 )
 
+from .utils import wait_for
+
 
 # =============================================================================
 # Fixtures
@@ -255,6 +257,69 @@ class TestDirectoryWatchingBasic:
         finally:
             watch1.close()
             watch2.close()
+
+    def test_closing_a_watch_keeps_the_others(self, tmp_path):
+        """Closing a watch of a directory leaves the other watches of it
+
+        (watchdog schedules a path once for all its handlers)
+        """
+        created = Event()
+        svc = FileWatcherService.instance()
+        closed = svc.watch_directory(tmp_path, on_created=lambda p: None)
+        kept = svc.watch_directory(tmp_path, on_created=lambda p: created.set())
+        try:
+            closed.close()
+            # Unscheduled by the poll thread
+            wait_for(lambda: not svc._pending_unschedule, what="the unschedule")
+            time.sleep(0.1)
+
+            (tmp_path / "new.txt").write_text("new")
+            assert created.wait(timeout=3.0)
+        finally:
+            kept.close()
+
+    @pytest.mark.parametrize("with_events", [True, False], ids=["events", "poll"])
+    def test_file_created_and_deleted_at_once(self, tmp_path, with_events):
+        """A file created and deleted between two polls is reported as a
+        change of the directory"""
+        changed = Event()
+        svc = FileWatcherService.instance()
+        watch = svc.watch_directory(
+            tmp_path,
+            on_dir_changed=changed.set,
+            min_poll_interval=0.1,
+            # Only the poll backstop, without event sources
+            source_factories=None if with_events else [],
+        )
+        try:
+            time.sleep(0.05)
+            path = tmp_path / "short-lived.txt"
+            path.write_text("x")
+            path.unlink()
+            assert changed.wait(timeout=5.0)
+        finally:
+            watch.close()
+
+    def test_fsunwatch_keeps_the_other_handlers(self, tmp_path):
+        """fsunwatch removes its handler only"""
+        from watchdog.events import FileSystemEventHandler
+
+        created = Event()
+
+        class Handler(FileSystemEventHandler):
+            def on_created(self, event):
+                created.set()
+
+        svc = FileWatcherService.instance()
+        removed_handler, kept_handler = FileSystemEventHandler(), Handler()
+        removed = svc.fswatch(removed_handler, tmp_path)
+        kept = svc.fswatch(kept_handler, tmp_path)
+        try:
+            svc.fsunwatch(removed, removed_handler)
+            (tmp_path / "new.txt").write_text("new")
+            assert created.wait(timeout=3.0)
+        finally:
+            svc.fsunwatch(kept, kept_handler)
 
     def test_close_stops_events(self, tmp_path):
         """Closing a watch stops further events"""
