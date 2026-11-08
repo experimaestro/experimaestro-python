@@ -506,7 +506,19 @@ the reason of an identifier change for a job with
 
 The `tools` command group gathers helpers for developers of
 experimaestro-based code: `check-documentation`, `find-launchers`,
-`install-skill`, `refactor` and `deprecated`.
+`environments`, `install-skill`, `refactor` and `deprecated`.
+
+### Python environments
+
+```bash
+# Environments listed by the current one (experimaestro-envs.json)
+experimaestro tools environments [--prefix PATH]
+
+# Also run their tests, and show the interpreter a job would use on this node
+experimaestro tools environments --check
+```
+
+See {ref}`slurm-python-environments`.
 
 ## Refactoring Code
 

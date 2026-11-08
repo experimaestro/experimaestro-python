@@ -118,3 +118,47 @@ def find_launchers(config: Path | None, spec: str):
         launcher_registry.LauncherRegistry.set_config_dir(config)
 
     print(launcher_registry.find_launcher(spec))
+
+
+@tools.command()
+@click.option(
+    "--prefix",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="Root of the Python environment (default: the current one)",
+)
+@click.option(
+    "--check",
+    is_flag=True,
+    help="Run the tests on this node, and show the interpreter a job would use",
+)
+def environments(prefix: Path | None, check: bool):
+    """Python environments chosen on the node running a job (SLURM)"""
+    from experimaestro.launchers.environments import (
+        ENVIRONMENTS_FILE,
+        python_environments,
+        succeeds,
+    )
+
+    root = Path(sys.prefix if prefix is None else prefix)
+    default = sys.executable if prefix is None else str(root / "bin" / "python")
+    envs = python_environments(root)
+    if not envs:
+        print(f"No {ENVIRONMENTS_FILE} in {root}: jobs use {default}")
+        return
+
+    print(f"Environments listed in {root / ENVIRONMENTS_FILE}")
+    print("(the first one whose test succeeds on the node, otherwise the default)\n")
+    selected = None
+    for i, env in enumerate(envs, 1):
+        status = ""
+        if check:
+            ok = succeeds(env)
+            status = " [test succeeds]" if ok else " [test fails]"
+            if ok and selected is None:
+                selected = env.python
+        print(f"{i}. {env.python}{status}")
+        print(f"   when: {env.when}")
+    print(f"Default: {default}")
+    if check:
+        print(f"\nOn this node, jobs would use {selected or default}")

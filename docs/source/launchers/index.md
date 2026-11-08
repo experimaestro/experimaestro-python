@@ -157,6 +157,76 @@ workspace (pending, running with their current job, idle) and the waiting jobs
 {py:class}`~experimaestro.launchers.slurm.PilotOptions` - Options of the pilot allocations.
 
 (dynamic)=
+(slurm-python-environments)=
+#### Python environments chosen on the node
+
+On a cluster whose nodes differ, a single Python environment may not run on all
+of them: a PyTorch build only has kernels for some GPU generations (e.g. the
+CUDA 13 builds have none for Pascal or Volta GPUs, and the CUDA 12.6 ones none
+for Blackwell GPUs), and an x86 environment does not run on ARM nodes. Since the
+partition, and thus the node, is only known once SLURM starts the job, the job
+script can choose the Python environment on the node.
+
+This is opt-in: the environment that runs the experiment (`sys.prefix`, e.g. a
+uv `.venv`) lists other environments in a `experimaestro-envs.json` file at its
+root:
+
+```json
+{"environments": [
+  {"python": "/home/user/project/.venv-arm/bin/python",
+   "when": "[ \"$(uname -m)\" = aarch64 ]"},
+  {"python": "/home/user/project/.venv-cu126/bin/python",
+   "when": "nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1 | grep -Eq '^(6\\.|7\\.0$)'"}
+]}
+```
+
+- Each `when` is a shell command, run on the node (in a subshell, with its output
+  discarded) before `srun`: the job runs with the `python` of the first one that
+  succeeds, and otherwise with the interpreter of the experiment. The job script
+  thus ends with:
+
+  ```sh
+  XPM_PYTHON=/home/user/project/.venv/bin/python
+  if ( [ "$(uname -m)" = aarch64 ]
+  ) >/dev/null 2>&1; then
+      XPM_PYTHON=/home/user/project/.venv-arm/bin/python
+  elif ...
+  fi
+  echo "experimaestro: Python interpreter $XPM_PYTHON" >&2
+  srun "$XPM_PYTHON" ./task.py
+  ```
+
+- The selected interpreter is reported in the standard error of the job.
+- Without the file, job scripts do not change (`srun ./task.py`, whose first line
+  gives the Python interpreter of the experiment).
+- This also applies to the jobs run by [pilot allocations](slurm-pilots), which
+  run the job script.
+- The environments should have the same packages (e.g. created from the same
+  lock file), and be created on a node with internet access (compute nodes often
+  have none), e.g. the login node.
+
+`experimaestro tools environments` lists the environments of the current one,
+and with `--check`, runs their tests to show the interpreter jobs would use on
+the current node (e.g. in an interactive SLURM job).
+
+````{admonition} Example: PyTorch with several CUDA versions
+:class: tip
+
+[xpm-torch](https://xpm-torch.readthedocs.io/en/stable/cuda.html) provides
+`xpm-torch uv-cuda-sync`, which creates one uv environment per CUDA build of
+torch (e.g. cu126 for the older GPUs, cu130 for the newer ones) and writes this
+file, with tests on the GPU of the node: an environment is used when its torch
+build has kernels for the GPU and the driver supports its CUDA version:
+
+```sh
+uv run xpm-torch uv-cuda-sync && uv run experimaestro run ...
+```
+````
+
+{py:func}`~experimaestro.launchers.environments.python_environments` - The environments listed by the current environment.
+
+{py:class}`~experimaestro.launchers.environments.PythonEnvironment` - A Python environment and its shell test.
+
 ### Dynamic Launcher
 
 The {py:class}`~experimaestro.launchers.DynamicLauncher` allows dynamic selection

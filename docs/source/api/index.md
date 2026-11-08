@@ -340,6 +340,17 @@ Type annotations are used to declare parameters in configurations and tasks.
    :members:
 ```
 
+### Python environments
+
+See {ref}`slurm-python-environments`.
+
+```{eval-rst}
+.. autoclass:: experimaestro.launchers.environments.PythonEnvironment
+   :members:
+
+.. autofunction:: experimaestro.launchers.environments.python_environments
+```
+
 ## Connectors
 
 ### LocalConnector

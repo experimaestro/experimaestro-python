@@ -16,6 +16,11 @@ from dataclasses import dataclass
 from experimaestro.utils import ThreadingCondition
 from functools import cached_property
 from experimaestro.launchers import Launcher
+from experimaestro.launchers.environments import (
+    PYTHON_VARIABLE,
+    python_environments,
+    shell_selection,
+)
 from experimaestro.scriptbuilder import PythonScriptBuilder
 from .pilot import DEADLINE_ENV, PilotOptions, start_in_pilot
 from experimaestro.connectors import (
@@ -1003,6 +1008,20 @@ class SlurmLauncher(Launcher):
         )
 
 
+def srun_command(script: str, python, environments=None) -> str:
+    """The end of the job script: runs the (quoted) task script, with the
+    Python interpreter chosen on the node when the current environment lists
+    others (see :mod:`experimaestro.launchers.environments`)"""
+    if environments is None:
+        environments = python_environments()
+    if not environments:
+        return f"srun ./{script}\n"
+    return (
+        shell_selection(str(python), environments)
+        + f'srun "${PYTHON_VARIABLE}" ./{script}\n'
+    )
+
+
 class SlurmScriptBuilder(PythonScriptBuilder):
     def __init__(self, launcher: SlurmLauncher, pythonpath=None):
         super().__init__(pythonpath)
@@ -1029,8 +1048,11 @@ class SlurmScriptBuilder(PythonScriptBuilder):
             for arg in self.launcher.options.args():
                 out.write(f"""#SBATCH {arg}\n""")
 
-            # We finish by the call to srun
-            out.write(f"""\nsrun ./{relpath(py_path)}\n\n""")
+            # We finish by the call to srun, with the Python environment chosen
+            # on the node if the current one lists others
+            out.write("\n")
+            out.write(srun_command(relpath(py_path), self.pythonpath))
+            out.write("\n")
 
         self.launcher.connector.setExecutable(sh_path, True)
         return sh_path
