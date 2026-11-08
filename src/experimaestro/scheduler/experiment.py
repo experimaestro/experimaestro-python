@@ -311,6 +311,8 @@ class experiment(BaseExperiment):
         self._services: dict[str, Service] = {}
         self._actions: dict[str, Any] = {}  # action_id -> Action
         self._objects_writer = None
+        self._event_writer = None
+        self._run_finalized = False
         self._job_listener: Listener | None = None
         self._register_signals = register_signals
         self._dirty_git = dirty_git
@@ -706,6 +708,10 @@ class experiment(BaseExperiment):
         from experimaestro.scheduler.interfaces import ExperimentStatus
         from .state_status import RunCompletedEvent
 
+        # Nothing is written for this run anymore: its jobs stay known to the
+        # scheduler, and may be submitted again by another experiment
+        self._run_finalized = True
+
         # Update final status in the experiment
         self._ended_at = datetime.now()
         if status in ("completed", "done"):
@@ -1037,6 +1043,7 @@ class experiment(BaseExperiment):
 
         is_normal_mode = self.workspace.run_mode == RunMode.NORMAL
         self._event_writer = None
+        self._run_finalized = False
         self._state_listener = None
 
         # Track job tags and dependencies directly (no more StatusData)

@@ -1796,10 +1796,17 @@ class BaseExperiment:
         Error states include the failure reason (e.g., "error:DEPENDENCY").
         The live experiment derives this from self.jobs; MockExperiment
         overrides to use _job_states directly.
+
+        This is the state of the job in the run, as the experiment events
+        give it: the scheduler state once final (a job not run because a
+        dependency failed has no execution state of its own, or that of a
+        previous run), otherwise resolved against the execution state.
         """
         result = {}
         for job_id, job in self.jobs.items():
-            state = job.state
+            state = job.scheduler_state
+            if not state.finished():
+                state = state.resolve(job.state) or job.state
             if state.is_error() and state.failure_reason is not None:
                 result[job_id] = f"error:{state.failure_reason.name}"
             else:

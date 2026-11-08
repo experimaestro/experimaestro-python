@@ -1040,7 +1040,9 @@ class Scheduler(StateProvider, threading.Thread):
                 continue
             self._last_written_scheduler_state[last_key] = current
 
-            if xp._event_writer is not None:
+            # (a finalized run is not written anymore: the job is now
+            # followed by the experiment that submitted it again)
+            if xp._event_writer is not None and not xp._run_finalized:
                 try:
                     xp._event_writer.write_event(event)
                 except Exception as e:
