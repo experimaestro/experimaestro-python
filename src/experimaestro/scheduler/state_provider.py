@@ -390,10 +390,19 @@ class StateProvider(ABC):
         A job that the run starts again (e.g. after a failure) is waiting,
         ready or scheduled there, while the outcome of its previous execution
         (markers, status) is only reset when it starts: the run state is then
-        the one to show. A final state reached after the run submitted the job
-        is not stale (the run state may only lag behind).
+        the one to show. The same goes for a job that the run did not start
+        because a dependency failed. A final state reached after the run
+        submitted the job is not stale (the run state may only lag behind).
         """
-        if exp_state not in (JobState.WAITING, JobState.READY, JobState.SCHEDULED):
+        not_run = (
+            exp_state.is_error()
+            and exp_state.failure_reason == JobFailureStatus.DEPENDENCY
+        )
+        if not not_run and exp_state not in (
+            JobState.WAITING,
+            JobState.READY,
+            JobState.SCHEDULED,
+        ):
             return False
         if not job.state.finished() or job.endtime is None:
             return False
@@ -972,8 +981,12 @@ class OfflineStateProvider(StateProvider):
                 value = self._query_cache.get(key, copy)
                 if value is not MISSING:
                     return value
+            # Not stored if the state changed while fetching
+            generation = self._query_cache.generation
             value = fetch()
-            self._query_cache.put(key, value, experiment_id=experiment_id)
+            self._query_cache.put(
+                key, value, experiment_id=experiment_id, generation=generation
+            )
         return copy(value) if copy is not None else value
 
     def invalidate_caches(self, experiment_id: str | None = None) -> None:
@@ -1852,10 +1865,9 @@ class MockJob(BaseJob):
     This class is used when loading job information from the database,
     as opposed to live Job instances which are created during experiment runs.
 
-    State resolution:
-    - If _has_event_state is True, return _state (from job events)
-    - Else if _experiment_status is set, return _experiment_status (from experiment)
-    - Else return UNSCHEDULED
+    ``state`` is the execution state; ``scheduler_state`` the state in the
+    run that last reported it (``_experiment_status``, from the experiment
+    events), the execution state otherwise.
     """
 
     def __init__(
@@ -1913,17 +1925,13 @@ class MockJob(BaseJob):
 
     @property
     def state(self) -> JobState:
-        """Get job state with fallback chain.
+        """Execution state of the job (from its events, markers or status)
 
-        Priority:
-        1. _state if set from job events (_has_event_state=True)
-        2. _experiment_status if set by experiment events
-        3. _state from status.json (may be stale but better than hardcoded default)
+        The state of the job in a run (``_experiment_status``, set by the
+        experiment events) is not used: the job is shared by the experiments
+        that submitted it, each with its own run state (see
+        :attr:`scheduler_state` and :meth:`StateProvider.get_resolved_state`).
         """
-        if self._has_event_state:
-            return self._state
-        if self._experiment_status is not None:
-            return self._experiment_status
         return self._state
 
     @state.setter
@@ -2756,6 +2764,25 @@ class MockExperiment(BaseExperiment):
                 self._finished_jobs += 1
             elif job_state.is_error():
                 self._failed_jobs += 1
+
+    def settle_job_state(self, job: BaseJob) -> bool:
+        """Take the final state of a job execution as its state in the run
+
+        The run state of a job is written by the scheduler; when the
+        scheduler is gone (killed run), a job still running then ends without
+        the run knowing it. A final execution state reached after the run
+        submitted the job is the state the run would have recorded (a live
+        run records it soon anyway); one of a previous execution is ignored.
+
+        Returns whether the run state changed.
+        """
+        run_state = self._job_states.get(job.identifier)
+        if run_state is None or run_state.finished() or not job.state.finished():
+            return False
+        if StateProvider._is_previous_result(job, self, run_state):
+            return False
+        self._update_job_state(job.identifier, job.state, merge_mode=False)
+        return True
 
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
         """Apply an event to update experiment state

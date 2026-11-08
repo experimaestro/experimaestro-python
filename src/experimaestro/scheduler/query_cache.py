@@ -56,6 +56,8 @@ class QueryCache:
         self.ttl = ttl
         self._entries: dict[Hashable, CacheEntry] = {}
         self._lock = threading.Lock()
+        #: Incremented whenever entries are dropped (see :meth:`put`)
+        self._generation = 0
         self.hits = 0
         self.misses = 0
 
@@ -102,10 +104,34 @@ class QueryCache:
         """Drop a single entry"""
         with self._lock:
             self._entries.pop(key, None)
+            self._generation += 1
 
-    def put(self, key: Hashable, value: Any, *, experiment_id: str | None) -> None:
-        """Store `value` for `key`, tagged with the experiment it derives from"""
+    @property
+    def generation(self) -> int:
+        """Changes whenever entries are dropped: to be read before computing a
+        value given to :meth:`put`"""
         with self._lock:
+            return self._generation
+
+    def put(
+        self,
+        key: Hashable,
+        value: Any,
+        *,
+        experiment_id: str | None,
+        generation: int | None = None,
+    ) -> None:
+        """Store `value` for `key`, tagged with the experiment it derives from
+
+        Args:
+            generation: The :attr:`generation` read before computing the
+                value; if entries were dropped since, the state changed while
+                the value was computed, which might then be stale: it is not
+                stored
+        """
+        with self._lock:
+            if generation is not None and generation != self._generation:
+                return
             self._entries[key] = CacheEntry(
                 value=value, experiment_id=experiment_id, timestamp=time.monotonic()
             )
@@ -120,6 +146,7 @@ class QueryCache:
                 drops everything.
         """
         with self._lock:
+            self._generation += 1
             if experiment_id is None:
                 self._entries.clear()
                 return
@@ -131,6 +158,7 @@ class QueryCache:
     def drop_if(self, predicate: Callable[[Hashable, CacheEntry], bool]) -> None:
         """Drop the entries for which ``predicate(key, entry)`` holds"""
         with self._lock:
+            self._generation += 1
             for key, entry in list(self._entries.items()):
                 if predicate(key, entry):
                     del self._entries[key]
@@ -143,6 +171,7 @@ class QueryCache:
         about each experiment is still valid.
         """
         with self._lock:
+            self._generation += 1
             for key, entry in list(self._entries.items()):
                 if entry.experiment_id is None:
                     del self._entries[key]
@@ -150,6 +179,7 @@ class QueryCache:
     def clear(self) -> None:
         """Drop every entry and reset the statistics"""
         with self._lock:
+            self._generation += 1
             self._entries.clear()
             self.hits = 0
             self.misses = 0

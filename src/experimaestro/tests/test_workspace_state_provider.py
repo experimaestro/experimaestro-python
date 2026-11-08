@@ -15,6 +15,7 @@ from pathlib import Path
 from experimaestro.tests.utils import wait_for
 
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+from experimaestro.scheduler.job_status import display_state
 from experimaestro.scheduler.state_status import (
     JobStateChangedEvent,
     JobProgressEvent,
@@ -1050,10 +1051,11 @@ class TestCleanJob:
             success, _ = provider.delete_job_safely(jobs[0], perform=True)
             assert success
 
-            # Re-query: job should now be reported as error with DELETED reason
+            # Re-query: job should now be shown as error with DELETED reason
+            # (its state in the run, the job data being gone)
             jobs = provider.get_jobs(experiment_id=exp_id)
             assert len(jobs) == 1
-            state = jobs[0].state
+            state = display_state(jobs[0], provider.get_experiment(exp_id))
             assert state.is_error()
             assert state.failure_reason == JobFailureStatus.DELETED
         finally:
@@ -1079,7 +1081,7 @@ class TestCleanJob:
         try:
             jobs = provider.get_jobs(experiment_id=exp_id)
             assert len(jobs) == 1
-            state = jobs[0].state
+            state = display_state(jobs[0], provider.get_experiment(exp_id))
             assert state.is_error()
             assert state.failure_reason == JobFailureStatus.DELETED
         finally:

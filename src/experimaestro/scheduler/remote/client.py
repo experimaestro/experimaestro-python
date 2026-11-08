@@ -10,6 +10,7 @@ Usage:
 """
 
 import atexit
+from collections import deque
 import logging
 import os
 import shlex
@@ -748,6 +749,15 @@ class SSHStateProviderClient(OfflineStateProvider):
         # Throttled notification delivery to avoid flooding UI
         self._pending_events: list[EventBase] = []
         self._pending_events_lock = threading.Lock()
+
+        # Job state events of the experiments, numbered as received: those
+        # received while an experiment is fetched are applied again to the
+        # answer (see _replay_job_states)
+        self._job_state_events: deque[tuple[int, ExperimentJobStateEvent]] = deque(
+            maxlen=10_000
+        )
+        self._events_received = 0
+        self._job_state_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
 
         # Job and experiment caches are inherited from OfflineStateProvider
@@ -1294,6 +1304,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         event = self._notification_to_event(method, params)
         if event:
             # Apply event to cached objects (like WorkspaceStateProvider does)
+            with self._job_state_events_lock:
+                self._events_received += 1
+                if isinstance(event, ExperimentJobStateEvent):
+                    self._job_state_events.append((self._events_received, event))
             self._apply_event_to_cache(event)
 
             with self._pending_events_lock:
@@ -1535,26 +1549,29 @@ class SSHStateProviderClient(OfflineStateProvider):
             "refresh": refresh,
             "job_infos": False,
         }
+        received = self._events_received
         result = self._call_sync(RPCMethod.GET_EXPERIMENTS, params)
-        return [self._get_or_load_experiment(d) for d in result]
+        return [self._get_or_load_experiment(d, received) for d in result]
 
     def _fetch_experiment(
         self, experiment_id: str, *, refresh: bool = False
     ) -> BaseExperiment | None:
         """Get a specific experiment by ID"""
         params = {"experiment_id": experiment_id, "refresh": refresh}
+        received = self._events_received
         result = self._call_sync(RPCMethod.GET_EXPERIMENT, params)
         if result is None:
             return None
-        return self._get_or_load_experiment(result)
+        return self._get_or_load_experiment(result, received)
 
     def _fetch_experiment_runs(
         self, experiment_id: str, *, refresh: bool = False
     ) -> list[BaseExperiment]:
         """Get all runs for an experiment"""
         params = {"experiment_id": experiment_id, "refresh": refresh}
+        received = self._events_received
         result = self._call_sync(RPCMethod.GET_EXPERIMENT_RUNS, params)
-        return [self._get_or_load_experiment(d) for d in result]
+        return [self._get_or_load_experiment(d, received) for d in result]
 
     def _fetch_current_run(
         self, experiment_id: str, *, refresh: bool = False
@@ -1951,8 +1968,15 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._translate_job_path(d)
         job.update_from_state_dict(d)
 
-    def _get_or_load_experiment(self, d: dict) -> MockExperiment:
-        """Get or load experiment from dict (uses base class caching)"""
+    def _get_or_load_experiment(
+        self, d: dict, received: int | None = None
+    ) -> MockExperiment:
+        """Get or load experiment from dict (uses base class caching)
+
+        Args:
+            received: The number of events received when the dict was asked
+                for (see :meth:`_replay_job_states`)
+        """
         experiment_id = d.get("experiment_id", "")
         run_id = d.get("run_id", "")
 
@@ -1960,7 +1984,27 @@ class SSHStateProviderClient(OfflineStateProvider):
             # Can't cache without identifiers, just create
             return self._create_experiment_from_dict(d)
 
-        return super()._get_or_load_experiment(experiment_id, run_id, d=d)
+        exp = super()._get_or_load_experiment(experiment_id, run_id, d=d)
+        if received is not None:
+            self._replay_job_states(exp, received)
+        return exp
+
+    def _replay_job_states(self, exp: MockExperiment, received: int) -> None:
+        """Apply again the job state events received after ``received``
+
+        The server answers with the state it had when handling the request:
+        the job state events it sent meanwhile may have been applied to the
+        cached experiment before the answer replaced its job states (and
+        nothing would send them again).
+        """
+        with self._job_state_events_lock:
+            events = [
+                event
+                for number, event in self._job_state_events
+                if number > received and event.experiment_id == exp.experiment_id
+            ]
+        for event in events:
+            exp.apply_event(event)
 
     def _create_experiment(
         self, experiment_id: str, run_id: str, *, d: dict

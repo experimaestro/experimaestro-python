@@ -726,23 +726,17 @@ class WorkspaceStateProvider(OfflineStateProvider):
         if run_id is not None:
             run_dir = self.workspace_path / "experiments" / experiment_id / run_id
             if run_dir.exists():
-                exp = MockExperiment.from_disk(run_dir, self.workspace_path)
-                if exp is not None:
-                    self._apply_pending_experiment_events(exp, experiment_id)
-                    if events:
-                        exp.apply_events(events)
-                    _mark_aborted(exp, run_dir)
-                    cache_key = (experiment_id, run_id)
-                    with self._experiment_cache_lock:
-                        self._experiment_cache[cache_key] = exp
-                    logger.debug(
-                        "Experiment %s after on_created: status=%s, "
-                        "job_states=%s, services=%d",
-                        experiment_id,
-                        exp.status.name if hasattr(exp.status, "name") else exp.status,
-                        getattr(exp, "_job_states", {}),
-                        len(getattr(exp, "services", [])),
-                    )
+                # Through the cache (under its lock): a query answered in the
+                # meantime has cached the experiment, which must remain the
+                # one the events update
+                exp = self._get_or_load_experiment(
+                    experiment_id, run_id, run_dir=run_dir
+                )
+                if events:
+                    exp.apply_events(events)
+                    # (the events give back the run states of the jobs
+                    # settled when loading it)
+                    self._check_aborted(exp, run_dir)
 
         # Forward events to listeners and emit summary notification
         if events:
@@ -917,6 +911,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 # Apply the event to update job state
                 job.apply_event(event)
 
+            self._settle_runs(job)
+
         # Forward to listeners
         self._notify_state_listeners(event)
 
@@ -951,15 +947,16 @@ class WorkspaceStateProvider(OfflineStateProvider):
             old_state = job.state
             job.load_from_disk()
             logger.debug("Job %s reloaded: %s -> %s", cache_key, old_state, job.state)
-            # Notify listeners if state changed so TUI refreshes
-            if job.state != old_state:
-                self._notify_state_listeners(
-                    JobStateChangedEvent(
-                        job_id=job.identifier,
-                        task_id=job.task_id,
-                        state=job.state.name,
-                    )
+        self._settle_runs(job)
+        # Notify listeners if state changed so TUI refreshes
+        if job.state != old_state:
+            self._notify_state_listeners(
+                JobStateChangedEvent(
+                    job_id=job.identifier,
+                    task_id=job.task_id,
+                    state=job.state.name,
                 )
+            )
 
     @property
     def read_only(self) -> bool:
@@ -1021,8 +1018,33 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 run_id=run_id,
             )
         self._apply_pending_experiment_events(exp, experiment_id)
-        _mark_aborted(exp, run_dir)
+        self._check_aborted(exp, run_dir)
         return exp
+
+    def _check_aborted(self, exp: MockExperiment, run_dir: Path) -> None:
+        """Marks a run whose process is gone as aborted (see
+        :func:`_mark_aborted`), and settles the jobs that ran when it stopped:
+        nothing records their end in the run"""
+        _mark_aborted(exp, run_dir)
+        if exp.status != ExperimentStatus.ABORTED:
+            return
+        for job_id, run_state in list(exp._job_states.items()):
+            info = exp.job_infos.get(job_id)
+            if info is not None and not run_state.finished():
+                exp.settle_job_state(self._get_or_load_job(job_id, info.task_id))
+
+    def _settle_runs(self, job: MockJob) -> None:
+        """Take the final state of a job as its state in the cached runs (see
+        :meth:`MockExperiment.settle_job_state`)"""
+        if not job.state.finished():
+            return
+        with self._experiment_cache_lock:
+            experiments = list(self._experiment_cache.values())
+        for exp in experiments:
+            if exp.settle_job_state(job):
+                self._notify_state_listeners(
+                    ExperimentUpdatedEvent(experiment_id=exp.experiment_id)
+                )
 
     def _on_cached_experiment_found(
         self, exp: MockExperiment, *, run_dir: Path
