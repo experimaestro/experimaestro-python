@@ -61,6 +61,16 @@ export type ProcessInfo = {
   detail?: string | null;
 };
 
+/** Where a job runs (hosts and allocated resources), once it started */
+export type ExecutionInfo = {
+  hosts: Array<string>;
+  partition?: string | null;
+  cpus?: number | null;
+  gpus: Array<string>;
+  /** One-line description (as shown by the TUI) */
+  summary: string;
+};
+
 // Known job statuses; the backend may also send scheduler states (e.g.
 // "scheduled"), so the field is typed as a string.
 export type JobStatus =
@@ -108,6 +118,7 @@ export type Job = {
 
   carbon?: CarbonMetrics | null;
   process?: ProcessInfo | null;
+  execution?: ExecutionInfo | null;
 
   experimentIds?: Array<string>; // Jobs can belong to multiple experiments
   dependsOn?: Array<string>; // Job IDs this job depends on

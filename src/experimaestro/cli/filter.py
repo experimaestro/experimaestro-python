@@ -40,6 +40,14 @@ def _as_text(value) -> str | None:
     return None if value is None else str(value)
 
 
+def _as_texts(value) -> list[str | None]:
+    """Text forms of the value(s) of a field: a field can have several values
+    (e.g. the hosts of a job), and a condition holds if one of them matches"""
+    if isinstance(value, list):
+        return [str(item) for item in value] or [None]
+    return [_as_text(value)]
+
+
 class VarExpr:
     def __init__(self, values):
         (self.varname,) = values
@@ -50,6 +58,12 @@ class VarExpr:
 
         if self.varname == "@name":
             return str(job.path.parent.name)
+
+        if self.varname == "@host":
+            return list(job.execution.hosts) if job.execution else None
+
+        if self.varname == "@partition":
+            return job.execution.partition if job.execution else None
 
         # Tags are stored in JobTagModel, accessed via ctx.tags_map keyed by job identifier
         job_tags = ctx.tags_map.get(job.identifier, {})
@@ -67,7 +81,7 @@ class BaseInExpr:
 
 class InExpr(BaseInExpr):
     def filter(self, job: "MockJob", ctx: FilterContext):
-        return _as_text(self.var.get(job, ctx)) in self.values
+        return any(text in self.values for text in _as_texts(self.var.get(job, ctx)))
 
     def __repr__(self):
         return f"""IN<{self.var}|{",".join(self.values)}>"""
@@ -75,7 +89,9 @@ class InExpr(BaseInExpr):
 
 class NotInExpr(BaseInExpr):
     def filter(self, job: "MockJob", ctx: FilterContext):
-        return _as_text(self.var.get(job, ctx)) not in self.values
+        return all(
+            text not in self.values for text in _as_texts(self.var.get(job, ctx))
+        )
 
     def __repr__(self):
         return f"""NOT_IN<{self.var}|{",".join(self.values)}>"""
@@ -90,11 +106,10 @@ class RegexExpr:
         return f"""REGEX[{self.var}, {self.regex.pattern}]"""
 
     def filter(self, job: "MockJob", ctx: FilterContext):
-        value = _as_text(self.var.get(job, ctx))
-        if value is None:
-            return False
-
-        return self.regex.match(value) is not None
+        return any(
+            text is not None and self.regex.match(text) is not None
+            for text in _as_texts(self.var.get(job, ctx))
+        )
 
 
 class ConstantString:
@@ -116,7 +131,8 @@ class EqExpr:
         return f"""EQ[{self.var1}, {self.var2}]"""
 
     def filter(self, job: "MockJob", ctx: FilterContext):
-        return _as_text(self.var1.get(job, ctx)) == _as_text(self.var2.get(job, ctx))
+        texts = _as_texts(self.var2.get(job, ctx))
+        return any(text in texts for text in _as_texts(self.var1.get(job, ctx)))
 
 
 class LogicExpr:
@@ -161,6 +177,8 @@ class LogicExpr:
 SPECIAL_FIELDS: dict[str, str] = {
     "@state": "job state",
     "@name": "task identifier",
+    "@host": "host running the job",
+    "@partition": "SLURM partition",
 }
 
 #: Comparison operators (as typed, with the text inserted when completing)
@@ -299,17 +317,25 @@ class FilterVocabulary:
     Attributes:
         tags: Values of each tag key
         names: Task identifiers (values of ``@name``)
+        hosts: Hosts running the jobs (values of ``@host``)
+        partitions: SLURM partitions of the jobs (values of ``@partition``)
         states: Values of ``@state``
     """
 
     tags: dict[str, set[str]] = field(default_factory=dict)
     names: set[str] = field(default_factory=set)
+    hosts: set[str] = field(default_factory=set)
+    partitions: set[str] = field(default_factory=set)
     states: list[str] = field(default_factory=state_names)
 
     def add_jobs(self, jobs: Iterable["MockJob"], tags_map: TagsMap) -> None:
         """Adds the task identifiers and tags of jobs (tags from ``tags_map``)"""
         for job in jobs:
             self.names.add(str(job.path.parent.name))
+            if job.execution:
+                self.hosts.update(job.execution.hosts)
+                if job.execution.partition:
+                    self.partitions.add(job.execution.partition)
             for key, value in tags_map.get(job.identifier, {}).items():
                 self.tags.setdefault(key, set()).add(str(value))
 
@@ -320,6 +346,10 @@ class FilterVocabulary:
                 return list(self.states)
             case "@name":
                 return sorted(self.names)
+            case "@host":
+                return sorted(self.hosts)
+            case "@partition":
+                return sorted(self.partitions)
         return sorted(self.tags.get(field_name, ()))
 
 

@@ -86,7 +86,7 @@ class SearchBar(Widget):
         # Search input container
         with Vertical(id="search-container"):
             yield Input(
-                placeholder="Filter: @state = 'done', @name ~ 'pattern', tag = 'value'",
+                placeholder="Filter: @state = 'done', @name ~ 'pattern', @host = 'node', tag = 'value'",
                 id="search-input",
             )
             yield Static(FILTER_SYNTAX_HINT, id="search-hints")
@@ -287,6 +287,10 @@ class JobDetailView(Widget):
             yield Label("", id="job-times-label")
             yield Label("Failure:", id="job-failure-title", classes="subsection-title")
             yield Label("", id="job-failure-label")
+            yield Label(
+                "Runs on:", id="job-execution-title", classes="subsection-title"
+            )
+            yield Label("", id="job-execution-label")
             yield Label("Process:", classes="subsection-title")
             yield Label("", id="job-process-label")
             yield Label("Carbon Impact:", classes="subsection-title")
@@ -624,6 +628,14 @@ class JobDetailView(Widget):
         for widget_id in ("#job-failure-title", "#job-failure-label"):
             self.query_one(widget_id, Label).display = failure_text is not None
         self.query_one("#job-failure-label", Label).update(failure_text or "")
+
+        # Where the job runs (hosts, allocated resources), once it started
+        execution_text = job.execution.describe() if job.execution else ""
+        for widget_id in ("#job-execution-title", "#job-execution-label"):
+            self.query_one(widget_id, Label).display = bool(execution_text)
+        self.query_one("#job-execution-label", Label).update(
+            escape_markup(execution_text)
+        )
 
         # Process information
         process_text = self._get_process_info(job)

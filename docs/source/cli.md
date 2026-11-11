@@ -230,6 +230,9 @@ The job filter is a boolean expression that allows filtering jobs by state, name
 
 - `@state`: Job state (values: `unscheduled`, `waiting`, `ready`, `scheduled`, `running`, `done`, `error`)
 - `@name`: Task identifier (e.g., `mymodule.MyTask`)
+- `@host`: Host running the job (or that ran it, for its last run); a job
+  running on several nodes matches when one of them does
+- `@partition`: SLURM partition of the job
 
 ### Operators
 

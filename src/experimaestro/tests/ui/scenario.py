@@ -27,6 +27,7 @@ from experimaestro.scheduler.interfaces import (
     JobState,
 )
 from experimaestro.carbon.storage import CarbonRecord, CarbonStorage
+from experimaestro.scheduler.execution import ExecutionInfo
 from experimaestro.scheduler.services import WebService
 from experimaestro.scheduler.state_status import (
     ConnectionState,
@@ -54,6 +55,8 @@ class JobSpec:
     failure: str | None = None
     #: Content of the ``.failed`` marker (None: not written)
     failed_marker: dict | None = None
+    #: Where the job runs (None: not recorded)
+    execution: ExecutionInfo | None = None
 
     @property
     def scriptname(self) -> str:
@@ -104,6 +107,10 @@ LEARN_TIMEOUT_MARKER = {
 EVAL_DEP_FAILED = "a6evaldepfailed"
 OLD_LEARN = "a0oldlearn"
 LEARN_RUNNING = "b1learnrunning"
+#: Where it runs: two nodes of a SLURM allocation
+LEARN_RUNNING_EXECUTION = ExecutionInfo(
+    hosts=["node07", "node08"], partition="gpu", cpus=8, gpus=["0", "1"]
+)
 EVAL_WAITING = "b2evalwaiting"
 LEARN_STUCK = "b3learnstuck"
 ABLATION_DONE = "d1ablationdone"
@@ -187,7 +194,13 @@ EXPERIMENTS = [
                 ExperimentStatus.RUNNING,
                 [
                     JobSpec(
-                        LEARN_RUNNING, "pkg.Learn", "running", {"model": "bm25"}, [], 0
+                        LEARN_RUNNING,
+                        "pkg.Learn",
+                        "running",
+                        {"model": "bm25"},
+                        [],
+                        0,
+                        execution=LEARN_RUNNING_EXECUTION,
                     ),
                     JobSpec(
                         EVAL_WAITING,
@@ -397,6 +410,7 @@ class ScenarioProvider(OfflineStateProvider):
             progress=[],
             updated_at="2026-01-01T00:00:00",
         )
+        job.execution = spec.execution
         self.jobs[spec.identifier] = job
         return job
 

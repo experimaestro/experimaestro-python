@@ -21,6 +21,7 @@ from experimaestro.scheduler import (
     service_operations,
 )
 from experimaestro.scheduler.event_filter import EventFilter
+from experimaestro.scheduler.execution import ExecutionInfo
 from experimaestro.scheduler.job_operations import Outcome
 from experimaestro.scheduler.job_status import (
     display_state,
@@ -106,6 +107,15 @@ def _process_to_frontend(process: dict[str, Any] | None) -> dict[str, Any] | Non
     }
 
 
+def _execution_to_frontend(execution: Any) -> dict[str, Any] | None:
+    """Where a job runs (``execution`` of state_dict()), with the description
+    shown by the TUI (``summary``)"""
+    info = ExecutionInfo.from_state_dict(execution)
+    if info is None:
+        return None
+    return {**info.state_dict(), "summary": info.describe()}
+
+
 def _job_dict_to_frontend(d: dict[str, Any]) -> dict[str, Any]:
     """Transform a job ``state_dict()`` into the frontend (camelCase) format.
 
@@ -134,6 +144,7 @@ def _job_dict_to_frontend(d: dict[str, Any]) -> dict[str, Any]:
         "dependsOn": d.get("depends_on", []),
         "carbon": _carbon_to_frontend(d.get("carbon_metrics")),
         "process": _process_to_frontend(d.get("process")),
+        "execution": _execution_to_frontend(d.get("execution")),
     }
 
 

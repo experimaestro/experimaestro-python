@@ -67,15 +67,18 @@ class FileBasedProgressReporter:
 
     def start_of_job(self):
         """Start of job notification - called when job execution begins"""
+        from experimaestro.scheduler.execution import ExecutionInfo
         from experimaestro.scheduler.state_status import JobStateChangedEvent
         from datetime import datetime
 
         with self.lock:
-            # Write JobStateChangedEvent with state="running" to event file
+            # Write JobStateChangedEvent with state="running" to event file,
+            # telling where the job runs
             event = JobStateChangedEvent(
                 job_id=self.job_id,
                 state="running",
                 started_time=datetime.now().isoformat(),
+                execution=ExecutionInfo.current().state_dict(),
             )
             self.event_writer.write_event(event)
             self.event_writer.flush()

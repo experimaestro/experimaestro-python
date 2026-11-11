@@ -140,7 +140,7 @@ def test_vocabulary_from_jobs():
 
 def test_complete_fields():
     # Special fields first, then the tag keys
-    assert _labels("") == ["@state", "@name", "lr", "model"]
+    assert _labels("") == ["@state", "@name", "@host", "@partition", "lr", "model"]
     assert _labels("@st") == ["@state"]
     assert _labels("mo") == ["model"]
     assert _accept("mo", "model") == "model "
@@ -201,7 +201,14 @@ def test_complete_boolean_operators():
     assert _accept("model = 'bm25' a", "and") == "model = 'bm25' and "
     # A space is added when needed
     assert _accept("model='bm25'", "and") == "model='bm25' and "
-    assert _labels("model = 'bm25' and ") == ["@state", "@name", "lr", "model"]
+    assert _labels("model = 'bm25' and ") == [
+        "@state",
+        "@name",
+        "@host",
+        "@partition",
+        "lr",
+        "model",
+    ]
 
 
 def test_complete_replaces_up_to_the_closing_quote():

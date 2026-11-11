@@ -186,7 +186,14 @@ async def test_invalid_filter_reports_error(ui):
 async def test_filter_completion(ui):
     """Fields, operators and values (from the jobs displayed) are suggested"""
     await ui.open_experiment("sweep")
-    assert await ui.filter_completions("") == ["@state", "@name", "model"]
+    assert await ui.filter_completions("") == [
+        "@state",
+        "@name",
+        "@host",
+        "@partition",
+        "model",
+    ]
+    assert await ui.filter_completions("@host = ") == ["'node07'", "'node08'"]
     assert await ui.filter_completions("@st") == ["@state"]
     assert await ui.filter_completions("model ") == ["=", "~", "in", "not in"]
     assert "'running'" in await ui.filter_completions("@state = ")
@@ -239,6 +246,25 @@ async def test_job_detail(ui):
     assert detail.state == "done"
     assert detail.tags == {"model": "bm25"}
     assert detail.dependencies == {LEARN_DONE: "done"}
+
+
+async def test_job_detail_execution(ui):
+    """The hosts and resources of a job are shown once it started"""
+    await ui.open_experiment("sweep")
+    detail = await ui.job_detail(LEARN_RUNNING)
+    assert detail.execution == "node07, node08 (partition gpu, 8 CPUs, GPUs 0,1)"
+    assert (await ui.job_detail(EVAL_WAITING)).execution is None
+
+
+async def test_filter_by_host(ui):
+    """A job matches when one of its hosts does"""
+    await ui.open_experiment("sweep")
+    assert await ui.set_filter("@host = 'node08'") is None
+    assert await ui.visible_jobs() == {LEARN_RUNNING}
+    assert await ui.set_filter("@host ~ 'node'") is None
+    assert await ui.visible_jobs() == {LEARN_RUNNING}
+    assert await ui.set_filter("@partition = 'gpu' and @host = 'node09'") is None
+    assert await ui.visible_jobs() == set()
 
 
 async def test_job_detail_dependency_state(ui):

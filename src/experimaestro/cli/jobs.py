@@ -29,7 +29,8 @@ def jobs(
 
     The job filter is a boolean expression where tags (alphanumeric)
     and special job information (@state for job state, @name for job full
-    name) can be compared to a given value (using '~' for regex matching,
+    name, @host for a host running the job, @partition for its SLURM
+    partition) can be compared to a given value (using '~' for regex matching,
     '=', 'not in', or 'in')
 
     For instance,

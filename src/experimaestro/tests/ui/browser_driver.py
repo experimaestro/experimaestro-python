@@ -486,6 +486,7 @@ class BrowserDriver:
             failure_message=await self._text_or_none(modal, ".failure-message"),
             failure_location=await self._text_or_none(modal, ".failure-location code"),
             failure_job_message=await self._job_message(modal),
+            execution=await self._text_or_none(modal, ".job-detail-execution"),
         )
 
     @classmethod

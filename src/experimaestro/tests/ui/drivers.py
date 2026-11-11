@@ -85,6 +85,8 @@ class JobDetail:
     failure_location: str | None = None
     #: What the job reported, when the launcher explained the failure
     failure_job_message: str | None = None
+    #: Where the job runs (hosts and resources), None if not shown
+    execution: str | None = None
 
 
 @dataclass

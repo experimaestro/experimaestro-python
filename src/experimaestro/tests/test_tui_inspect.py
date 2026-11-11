@@ -31,6 +31,7 @@ class DummyJob(BaseJob):
         self.progress = []
         self._process = None
         self.carbon_metrics = None
+        self.execution = None
         self.resumable = False
         self.retry_count = 0
         self.max_retries = None

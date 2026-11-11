@@ -309,6 +309,8 @@ class JobStateChangedEvent(JobEventBase):
     exit_code: int | None = None
     retry_count: int = 0
     progress: list[ProgressLevel] = field(default_factory=list)
+    #: Where the job runs (``ExecutionInfo.state_dict()``), sent when it starts
+    execution: dict | None = None
 
 
 @dataclass

@@ -153,6 +153,13 @@ export const TaskDetailBody = ({ job }: { job: Job }) => {
             </>
           )}
 
+          {job.execution && job.execution.summary && (
+            <>
+              <span className={classes.what}>Runs on</span>
+              <div className="job-detail-execution">{job.execution.summary}</div>
+            </>
+          )}
+
           {proc && (
             <>
               <span className={classes.what}>Process</span>

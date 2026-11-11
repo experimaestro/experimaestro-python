@@ -54,6 +54,7 @@ from experimaestro.notifications import (
     ProgressInformation,
     get_progress_information_from_dict,
 )
+from experimaestro.scheduler.execution import ExecutionInfo
 from experimaestro.scheduler.query_cache import MISSING, QueryCache, freeze
 from experimaestro.scheduler.state_status import ConnectionState, EventBase
 
@@ -2167,6 +2168,7 @@ class MockJob(BaseJob):
         )
         job.resumable = d.get("resumable", False)
         job.max_retries = d.get("max_retries")
+        job.apply_execution(d.get("execution"))
         return job
 
     def update_from_state_dict(self, d: dict) -> None:
@@ -2202,6 +2204,7 @@ class MockJob(BaseJob):
 
         if carbon_dict := d.get("carbon_metrics"):
             self.carbon_metrics = CarbonMetricsData(**carbon_dict)
+        self.execution = ExecutionInfo.from_state_dict(d.get("execution"))
         if run_group_id := d.get("run_group_id"):
             self.run_group_id = run_group_id
         if self.path is None and (path := d.get("path")) is not None:

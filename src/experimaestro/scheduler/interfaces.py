@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from experimaestro.connectors import Process
+    from experimaestro.scheduler.execution import ExecutionInfo
     from experimaestro.scheduler.state_provider import CarbonMetricsData
     from experimaestro.scheduler.state_status import EventBase, JobStateChangedEvent
     from experimaestro.carbon.base import CarbonAggregateData, CarbonImpactData
@@ -625,6 +626,7 @@ class BaseJob:
         exit_code: Process exit code (optional)
         retry_count: Number of retries (timeouts of a resumable task)
         max_retries: Maximum number of retries (None if unknown)
+        execution: Where the last run of the job runs or ran (None if unknown)
     """
 
     identifier: str
@@ -638,6 +640,7 @@ class BaseJob:
     max_retries: int | None
     resumable: bool
     carbon_metrics: Optional["CarbonMetricsData"]
+    execution: Optional["ExecutionInfo"]
     run_group_id: str | None
     _previous_carbon_metrics: Optional["CarbonMetricsData"]
     _progress: list
@@ -659,6 +662,7 @@ class BaseJob:
         self.max_retries: int | None = None
         self.resumable: bool = False
         self.carbon_metrics: "CarbonMetricsData | None" = None
+        self.execution: "ExecutionInfo | None" = None
         self._progress: list = []
         self._process = None
         self._process_dict = None
@@ -929,6 +933,9 @@ class BaseJob:
                 "is_final": prev_carbon.is_final,
                 "written": prev_carbon.written,
             }
+        # Where the job runs (hosts, allocated resources)
+        if self.execution is not None:
+            result["execution"] = self.execution.state_dict()
         # Include run_group_id if set
         if self.run_group_id is not None:
             result["run_group_id"] = self.run_group_id
@@ -966,7 +973,16 @@ class BaseJob:
             exit_code=state_data.get("exit_code"),
             retry_count=state_data.get("retry_count", 0),
             progress=progress,
+            execution=state_data.get("execution"),
         )
+
+    def apply_execution(self, data: dict[str, Any] | None) -> None:
+        """Set where the job runs from the record of a state event (events
+        without a record leave it unchanged)"""
+        from experimaestro.scheduler.execution import ExecutionInfo
+
+        if (execution := ExecutionInfo.from_state_dict(data)) is not None:
+            self.execution = execution
 
     def write_status(self) -> None:
         """Write job state to status.json file.
@@ -1031,6 +1047,7 @@ class BaseJob:
                 self.exit_code = event.exit_code
             if event.retry_count:
                 self.retry_count = event.retry_count
+            self.apply_execution(event.execution)
             logger.debug(
                 "Applied state change to job %s: %s", self.identifier, self.state
             )
@@ -1427,6 +1444,11 @@ class BaseJob:
                 written=prev_carbon_dict.get("written", False),
             )
 
+        # Load where the job runs
+        from experimaestro.scheduler.execution import ExecutionInfo
+
+        self.execution = ExecutionInfo.from_state_dict(status_dict.get("execution"))
+
         # Load run_group_id
         self.run_group_id = status_dict.get("run_group_id")
 
@@ -1489,6 +1511,8 @@ class BaseJob:
             else:
                 self._previous_carbon_metrics = self.carbon_metrics
         self.carbon_metrics = None
+        # Only the last run is described
+        self.execution = None
         self.endtime = None
         self.starttime = None
 

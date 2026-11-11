@@ -446,11 +446,14 @@ class TaskRunner:
 
     def _update_status_running(self) -> None:
         """Update status.json to 'running' state before writing event files."""
+        from experimaestro.scheduler.execution import ExecutionInfo
         from experimaestro.scheduler.interfaces import JobState
 
         try:
             mock_job = self._load_mock_job()
             mock_job.set_state(JobState.RUNNING)
+            # Where the job runs (hosts, allocated resources)
+            mock_job.execution = ExecutionInfo.current()
             mock_job.write_status()
         except Exception as e:
             logger.warning("Failed to update status.json to running: %s", e)

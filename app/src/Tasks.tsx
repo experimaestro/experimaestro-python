@@ -33,7 +33,8 @@ const SORT_LABELS: { [key in SortKey]: { label: string; shortcut: string } } = {
 };
 
 // Same hint as the TUI search bar (FILTER_SYNTAX_HINT in cli/filter.py)
-const FILTER_SYNTAX_HINT = "Syntax: @state = 'done' | @name ~ 'regex' | tag = 'value' | and/or";
+const FILTER_SYNTAX_HINT =
+  "Syntax: @state = 'done' | @name ~ 'regex' | @host = 'node' | tag = 'value' | and/or";
 
 // Delay before sending the filter expression to the server
 const FILTER_DEBOUNCE_MS = 300;

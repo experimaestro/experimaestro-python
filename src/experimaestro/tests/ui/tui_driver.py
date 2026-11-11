@@ -432,7 +432,13 @@ class TuiDriver:
             failure_message=self._shown_failure(view, "message"),
             failure_location=self._shown_failure(view, "location"),
             failure_job_message=self._shown_failure(view, "job_message"),
+            execution=self._shown_execution(),
         )
+
+    def _shown_execution(self) -> str | None:
+        """Where the job runs, if shown"""
+        label = self.app.query_one("#job-execution-label", Label)
+        return str(label.render()) if label.display else None
 
     def _shown_failure(self, view: JobDetailView, name: str) -> str | None:
         """A failure detail, if the failure section shows it"""

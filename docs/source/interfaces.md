@@ -58,8 +58,9 @@ Then open `http://localhost:12345` in your browser.
   TUI search bar, evaluated by the server so that both interfaces select the
   same jobs; invalid expressions are reported below the input. Suggestions
   appear while typing (or with `Ctrl+Space` / `↓`): the fields (`@state`,
-  `@name` and the tag keys), the operators, then the values of the field —
-  job states, task identifiers or tag values of the displayed jobs — and
+  `@name`, `@host`, `@partition` and the tag keys), the operators, then the
+  values of the field — job states, task identifiers, hosts or tag values of
+  the displayed jobs — and
   `and`/`or`; `↑`/`↓` select one, `Tab` or `Enter` accepts it, `Esc` closes
   the list (a second `Esc` clears the filter)
 - **Grouped View**: *Group by* status, task or tag value, with collapsible
@@ -80,7 +81,8 @@ Then open `http://localhost:12345` in your browser.
   ask for confirmation, and a notification at the top right tells what was
   copied. The duration and CO₂ of a job are below its submission date
 - **Job Details**: The details of a job show its parameters, logs, output
-  paths, its failure reason with what happened (see below) and its
+  paths, where it runs (see [Hosts and resources](#hosts-and-resources)), its
+  failure reason with what happened (see below) and its
   dependencies with their status (click a dependency to open its details,
   e.g. to find the job at the source of a failure)
 - **Experiment Filtering**: Filter jobs by experiment ID and run
@@ -167,7 +169,9 @@ experimaestro --workdir /path/to/workspace monitor --console
 - **Job Table**: Scrollable list of jobs with status indicators, filtered with
   [filter expressions](#job-filter-expressions) (`/`)
 - **Tree View**: Jobs grouped by status, task and/or tag (`t`)
-- **Job Details**: Process, carbon, tags, progress, the failure reason with
+- **Job Details**: Where the job runs (see
+  [Hosts and resources](#hosts-and-resources)), process, carbon, tags,
+  progress, the failure reason with
   what happened (see below) and the job dependencies with their status and failure reason (click a dependency to
   open its details, `Esc` to come back to the job it was opened from)
 - **Live Logs**: Real-time log output panel
@@ -321,6 +325,8 @@ The TUI search bar (`/`) and the web *Filter* input accept the same expressions
 |------------|---------|
 | `@state = 'done'` | Job state (`unscheduled`, `waiting`, `ready`, `scheduled`, `running`, `done`, `error`) |
 | `@name ~ 'pkg\.Learn'` | Task identifier matches a regular expression (anchored at the start) |
+| `@host = 'node042'` | Host running the job (one of them, for a job on several nodes; see [Hosts and resources](#hosts-and-resources)) |
+| `@partition = 'gpu'` | SLURM partition of the job |
 | `model = 'bm25'` | Tag value of the job in the displayed experiment run |
 | `@state in ['running', 'waiting']` | Value in a list (`not in` for the converse) |
 | `... and ...`, `... or ...` | Combine conditions |
@@ -613,6 +619,22 @@ experimaestro dag VictorMorand/Mice-P-61m --html mice_dag.html
 ```
 
 See [Experiment DAG Visualization](cli.md#experiment-dag-visualization) in the CLI reference for details and options.
+
+## Hosts and resources
+
+The job details of both interfaces show where a job runs (*Runs on*), e.g.
+`node042 (partition gpu, 8 CPUs, GPUs 0,1)`:
+
+- the host of the job process or, in a SLURM allocation (pilot jobs
+  included), its nodes — the one running the job process first;
+- for SLURM jobs, the partition and the CPUs and GPUs allocated on that node.
+
+The job process records this when it starts (in its `status.json`, from its
+host name and the SLURM environment), so it is shown by any monitor — also
+through SSH, or on a machine without the SLURM commands — and kept once the
+job has ended. Only the last run of a job is described: a retry replaces it.
+Jobs can be selected by host or partition with the `@host` and `@partition`
+[filter](#job-filter-expressions) fields.
 
 ## Failure details
 

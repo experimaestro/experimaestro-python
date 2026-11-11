@@ -791,6 +791,7 @@ class Scheduler(StateProvider, threading.Thread):
                 job.starttime = deserialize_to_datetime(event.started_time)
             if event.ended_time and job.endtime is None:
                 job.endtime = deserialize_to_datetime(event.ended_time)
+            job.apply_execution(event.execution)
             # Forward to state listeners
             self._notify_state_listeners_async(event)
 
