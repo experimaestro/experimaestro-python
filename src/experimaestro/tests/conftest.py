@@ -13,6 +13,12 @@ import shutil  # noqa: E402
 # double logging when using pytest -s with --log-cli-level
 logging.getLogger().addHandler(logging.NullHandler())
 
+# Tests check the plain text output: don't let the environment force colours
+# (rich-click forces a terminal when one of these is set, e.g. on GitHub
+# Actions); must be done before experimaestro.cli builds its help config
+for _name in ("FORCE_COLOR", "PY_COLORS", "GITHUB_ACTIONS", "TERMINAL_WIDTH"):
+    os.environ.pop(_name, None)
+
 from experimaestro.connectors import Process  # noqa: E402
 
 # Set shorter poll interval for tests (before any imports that read it)

@@ -42,8 +42,10 @@ lockpath 9 "$XPM_SLURM_DIR/slurm.lock"
 echo "Command line: $@" >&2
 args=()
 parsable=0
-stdout="/dev/stdout"
-stderr="/dev/stdout"
+# Like real SLURM, the job output never goes to sbatch stdout (which is parsed
+# for the job id): default to files in the jobs directory
+stdout=""
+stderr=""
 while true; do
     case "$1" in
         --parsable) shift; parsable=1;;
@@ -67,6 +69,8 @@ cd "$chdir"
 echo "Starting $@ ${args[@]} > $stdout 2> $stderr" >&2
 # Get job ID before forking
 JOBID="$$"
+test -n "$stdout" || stdout="$XPM_SLURM_DIR/jobs/$JOBID.out"
+test -n "$stderr" || stderr="$stdout"
 (
     export PATH="${CURDIR}/bin:$PATH"
     export SLURM_JOB_ID="$JOBID"
