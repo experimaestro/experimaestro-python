@@ -779,7 +779,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         notice: checks the current run of the experiments in cache, and looks
         for new experiments.
         """
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             cached = {experiment_id for experiment_id, _ in self._experiment_cache}
         changed = {
             experiment_id
@@ -840,7 +840,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         if events:
             cache_key = entity_id
-            with self._job_cache_lock:
+            with self._cache_lock:
                 job = self._job_cache.get(cache_key)
                 if job is None:
                     # Try to get task_id from events
@@ -909,7 +909,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         logger.debug("Received job event for %s: %s", cache_key, event)
 
         if isinstance(event, JobEventBase):
-            with self._job_cache_lock:
+            with self._cache_lock:
                 job = self._job_cache.get(cache_key)
 
                 if job is None:
@@ -970,7 +970,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         logger.debug("Job events deleted for %s", entity_id)
         cache_key = entity_id
-        with self._job_cache_lock:
+        with self._cache_lock:
             job = self._job_cache.get(cache_key)
             if job is None:
                 logger.debug(
@@ -1067,8 +1067,9 @@ class WorkspaceStateProvider(OfflineStateProvider):
         _mark_aborted(exp, run_dir)
         if exp.status != ExperimentStatus.ABORTED:
             return
-        for job_id, run_state in list(exp._job_states.items()):
-            info = exp.job_infos.get(job_id)
+        job_infos = exp.job_infos
+        for job_id, run_state in exp.job_states.items():
+            info = job_infos.get(job_id)
             if info is not None and not run_state.finished():
                 exp.settle_job_state(self._get_or_load_job(job_id, info.task_id))
 
@@ -1077,7 +1078,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
         :meth:`MockExperiment.settle_job_state`)"""
         if not job.state.finished():
             return
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             experiments = list(self._experiment_cache.values())
         for exp in experiments:
             if exp.settle_job_state(job):
@@ -1120,9 +1121,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
                             job_info = ExperimentJobInformation.from_dict(record)
                             new_infos[job_info.job_id] = job_info
                     # Merge: add new jobs, keep existing state
-                    for job_id, info in new_infos.items():
-                        if job_id not in exp._job_infos:
-                            exp._job_infos[job_id] = info
+                    for info in new_infos.values():
+                        exp.add_job_info(info, replace=False)
                     self._jobs_jsonl_mtime[exp.experiment_id] = current_mtime
                 except (OSError, json.JSONDecodeError):
                     pass
@@ -1222,7 +1222,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         cache_key = (experiment_id, run_id)
 
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             if cache_key in self._experiment_cache:
                 self._experiment_cache[cache_key].apply_event(event)
 
@@ -1245,7 +1245,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                         except (KeyError, ValueError):
                             pass
                     reset = None
-                    with self._job_cache_lock:
+                    with self._cache_lock:
                         job = self._job_cache.get(job_cache_key)
                         if job is not None:
                             job._experiment_status = new_state
@@ -1813,10 +1813,12 @@ class WorkspaceStateProvider(OfflineStateProvider):
             # Get job from cache or load from disk
             job = self._get_or_load_job(job_id, job_info.task_id)
 
-            # Set experiment status from tracked job states
-            exp_state = exp.get_job_state(job_id)
-            if exp_state is not None:
-                job._experiment_status = exp_state
+            # Set experiment status from tracked job states (with the lock
+            # held: an event changing the state meanwhile is applied after)
+            with self._cache_lock:
+                exp_state = exp.get_job_state(job_id)
+                if exp_state is not None:
+                    job._experiment_status = exp_state
 
             # Apply state filter on loaded job
             if state:
@@ -1965,7 +1967,8 @@ class WorkspaceStateProvider(OfflineStateProvider):
         # Get experiment from cache or load from disk
         exp = self._get_or_load_experiment(experiment_id, run_id, run_dir)
 
-        return exp.job_infos
+        # A copy: the cached answer is updated in place by the events
+        return dict(exp.job_infos)
 
     # =========================================================================
     # Services
@@ -2037,7 +2040,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
                 return False
 
             # Clear job from cache — the job disappears from every query
-            with self._job_cache_lock:
+            with self._cache_lock:
                 self._job_cache.pop(job.cache_key, None)
             self._query_cache.invalidate()
 
@@ -2046,7 +2049,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
             # stale finished/error state. Collect affected runs to also
             # persist the change to status.json on disk.
             affected_runs: list[tuple[str, str, MockExperiment]] = []
-            with self._experiment_cache_lock:
+            with self._cache_lock:
                 for (exp_id, run_id), exp in self._experiment_cache.items():
                     if exp.mark_job_deleted(job.identifier):
                         affected_runs.append((exp_id, run_id, exp))
@@ -2535,7 +2538,7 @@ class WorkspaceStateProvider(OfflineStateProvider):
 
         # Clear caches
         self._clear_experiment_cache(experiment_id)
-        with self._job_cache_lock:
+        with self._cache_lock:
             for job in jobs:
                 self._job_cache.pop(job.cache_key, None)
 

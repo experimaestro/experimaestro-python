@@ -33,6 +33,7 @@ from experimaestro.scheduler.experiment import FailedExperiment
 from experimaestro.scheduler.job_status import display_state
 from experimaestro.scheduler.state_provider import StateProvider
 from experimaestro.scheduler.workspace_state_provider import WorkspaceStateProvider
+from experimaestro.utils.atomic import atomic_write
 
 from .test_relaunch_jobs_list import LocalClient
 from .utils import get_test_timeout, wait_for
@@ -108,9 +109,13 @@ class Scenario:
         self.monitor.watch(self.page, set(self.watched))
 
     def set(self, **actions: str):
-        """Sets what the jobs do (``ok``, ``fail`` or ``block``)"""
+        """Sets what the jobs do (``ok``, ``fail`` or ``block``)
+
+        Atomically: a blocked job reads its file again and again, and would
+        fail if it read it while it is being rewritten (empty)
+        """
         for name, action in actions.items():
-            (self.control / self.n(name)).write_text(action)
+            atomic_write(self.control / self.n(name), action)
 
     # --- Runs
 

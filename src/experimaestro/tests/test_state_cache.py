@@ -399,7 +399,152 @@ def test_concurrent_misses_fetch_once():
     assert provider.calls["experiments"] == 1
 
 
+# --- Events applied while a query is answered
+
+
+def test_answer_missing_a_submitted_job_is_not_cached():
+    """A job submitted while a query is answered cannot be added to the
+    answer (not cached yet), which might miss it: it is not cached"""
+
+    class Provider(CountingProvider):
+        event_pending = True
+
+        def state_read(self):
+            # The event is applied once the state has been read
+            if self.event_pending:
+                self.event_pending = False
+                self.apply_event(submitted(tags=[JobTag(key="fold", value="1")]))
+
+        def _fetch_jobs(self, experiment_id=None, *args, **kwargs):
+            jobs = super()._fetch_jobs(experiment_id, *args, **kwargs)
+            self.state_read()
+            return jobs
+
+        def _fetch_tags_map(self, experiment_id, run_id=None, *, refresh=False):
+            tags = super()._fetch_tags_map(experiment_id, run_id, refresh=refresh)
+            self.state_read()
+            return tags
+
+    provider = Provider()
+    provider.get_jobs("exp1")
+    provider.get_jobs("exp1")
+    assert provider.calls["jobs:exp1"] == 2, "the first answer was cached"
+    provider.get_jobs("exp1")
+    assert provider.calls["jobs:exp1"] == 2
+
+    provider.event_pending = True
+    provider.get_tags_map("exp1")
+    provider.get_tags_map("exp1")
+    assert provider.calls["tags:exp1"] == 2, "the first answer was cached"
+
+
+def test_answer_missing_a_service_state_is_not_cached():
+    """Same for the state of the services read while a query is answered"""
+
+    class Provider(CountingProvider):
+        def _fetch_services_from_storage(self, experiment_id, run_id):
+            services = super()._fetch_services_from_storage(experiment_id, run_id)
+            if self.calls[f"services:{experiment_id}"] == 1:
+                self.apply_event(
+                    ServiceStateChangedEvent(
+                        experiment_id="exp1",
+                        run_id="run1",
+                        service_id="s1",
+                        state="RUNNING",
+                    )
+                )
+            return services
+
+    provider = Provider()
+    provider.services[("exp1", "run1")] = [_service("s1", "run1")]
+    provider.get_services("exp1", run_id="run1")
+    provider.get_services("exp1", run_id="run1")
+    assert provider.calls["services:exp1"] == 2
+
+
+def test_experiment_read_while_events_are_applied():
+    """The jobs, services and actions of an experiment can be read (by the
+    UIs, by the queries) while events add some, from another thread"""
+    exp = MockExperiment(workdir=None, run_id="run1", experiment_id_override="exp1")
+
+    def add(index: int):
+        exp.apply_event(
+            submitted(job_id=f"job-{index}", tags=[JobTag(key="fold", value="1")])
+        )
+        exp.apply_event(
+            ServiceAddedEvent(
+                experiment_id="exp1", run_id="run1", service_id=f"service-{index}"
+            )
+        )
+        exp.apply_event(
+            ActionAddedEvent(
+                experiment_id="exp1", run_id="run1", action_id=f"action-{index}"
+            )
+        )
+
+    add(0)
+    add(1)
+    for index, _ in enumerate(exp.job_infos.items(), start=2):
+        add(index)
+    for index, _ in enumerate(exp.services.items(), start=4):
+        add(index)
+    for index, _ in enumerate(exp.actions.items(), start=8):
+        add(index)
+    for index, _ in enumerate(exp.job_states.items(), start=16):
+        add(index)
+
+    assert len(exp.job_infos) == len(exp.services) == len(exp.actions) == 32
+    assert exp.total_jobs == 32
+    assert set(exp.tags) == set(exp.job_infos) == set(exp.state_dict()["job_states"])
+
+
+def test_experiment_read_by_a_thread_while_events_are_applied():
+    """Same, with a thread reading the experiment as fast as it can"""
+    exp = MockExperiment(workdir=None, run_id="run1", experiment_id_override="exp1")
+    done = threading.Event()
+    errors: list[Exception] = []
+
+    def read():
+        try:
+            while not done.is_set():
+                for _ in exp.job_infos.items():
+                    pass
+                exp.state_dict()
+                # (jobs are only added: read in this order)
+                tagged = len(exp.tags)
+                assert exp.total_jobs >= tagged
+        except Exception as error:
+            errors.append(error)
+
+    reader = threading.Thread(target=read)
+    reader.start()
+    try:
+        for index in range(2000):
+            exp.apply_event(
+                submitted(job_id=f"job-{index}", tags=[JobTag(key="fold", value="1")])
+            )
+    finally:
+        done.set()
+        reader.join(10)
+    assert not errors
+    assert exp.total_jobs == 2000
+
+
 class TestQueryCache:
+    def test_put_after_touch_is_not_stored(self):
+        """An answer computed before the state changed is not stored"""
+        cache = QueryCache()
+        generation = cache.generation
+        cache.touch()
+        value = cache.put(
+            ("a",), [1], experiment_id=None, generation=generation, copy=list
+        )
+        assert value == [1]
+        assert cache.get(("a",)) is MISSING
+
+        cache.put(("a",), [1], experiment_id=None, generation=cache.generation)
+        assert cache.get(("a",)) == [1]
+
     def test_miss_returns_sentinel(self):
         cache = QueryCache()
         assert cache.get(("a",)) is MISSING

@@ -4,6 +4,7 @@ The client applies the events to its cache on reception, and notifies its
 listeners in batches (every ``_notify_interval`` seconds).
 """
 
+import io
 import threading
 import time
 from dataclasses import asdict
@@ -14,9 +15,11 @@ from experimaestro.scheduler.remote.client import (
     SSHStateProviderClient,
     coalesce_events,
 )
+from experimaestro.scheduler.interfaces import JobState
 from experimaestro.scheduler.remote.protocol import (
     NotificationMethod,
     RPCNotification,
+    RPCResponse,
 )
 from experimaestro.scheduler.state_status import (
     EventBase,
@@ -186,9 +189,9 @@ def server_experiments(client, tmp_path):
     client.local_cache_dir = tmp_path
     calls = []
 
-    def call_sync(method, params, timeout=None):
+    def call_sync(method, params, timeout=None, decode=None):
         calls.append(method)
-        return [
+        result = [
             {
                 "experiment_id": "exp",
                 "run_id": "run",
@@ -199,6 +202,8 @@ def server_experiments(client, tmp_path):
                 "failed_jobs": 1,
             }
         ]
+        # Answered at once: no event is received meanwhile
+        return decode(result, client._events_received)
 
     client._call_sync = call_sync
     return calls
@@ -251,8 +256,8 @@ def test_read_experiment_updates_job_states(client, server_experiments):
     assert counts(client) == (3, 1, 1)
     server_experiments.clear()
 
-    def call_sync(method, params, timeout=None):
-        return [
+    def call_sync(method, params, timeout=None, decode=None):
+        result = [
             {
                 "experiment_id": "exp",
                 "run_id": "run",
@@ -261,9 +266,122 @@ def test_read_experiment_updates_job_states(client, server_experiments):
                 "total_jobs": 3,
             }
         ]
+        return decode(result, client._events_received)
 
     client._call_sync = call_sync
     client.get_experiments(refresh=True)
     assert counts(client) == (3, 2, 1)
     notify(client, job_state("j1", "done"))
     assert counts(client) == (3, 2, 1)
+
+
+# --- Answers and events about the same jobs
+
+
+def job_dict(state: str) -> dict:
+    return {"job_id": "j1", "task_id": "pkg.Task", "state": state}
+
+
+@pytest.fixture
+def connected(client, tmp_path):
+    """The client, sending its requests to a server that the test plays"""
+    client.local_cache_dir = tmp_path
+    client._stdin = io.BytesIO()
+    client._session_open = True
+    return client
+
+
+def asking_jobs(client) -> tuple[threading.Thread, list]:
+    """Asks for the jobs of the experiment from another thread, as the UIs
+    do: returns once the request is sent"""
+    answers: list = []
+    sent = len(client._stdin.getvalue())
+    thread = threading.Thread(
+        target=lambda: answers.append(client.get_jobs("exp", refresh=True))
+    )
+    thread.start()
+    deadline = time.monotonic() + 5
+    while len(client._stdin.getvalue()) == sent:
+        assert time.monotonic() < deadline, "request not sent"
+        time.sleep(0.001)
+    return thread, answers
+
+
+def answer(client, result) -> None:
+    """Make the client receive the answer to its last request"""
+    client._handle_response(RPCResponse(id=client._request_id, result=result))
+
+
+def test_event_received_after_the_answer(connected):
+    """The server answers, then sends an event: the event is applied after
+    the answer, even if the thread that asked reads the answer later"""
+    thread, answers = asking_jobs(connected)
+    answer(connected, [job_dict("running")])
+    notify(connected, JobStateChangedEvent(job_id="j1", state="done"))
+    thread.join(5)
+
+    ((job,),) = answers
+    assert job.state == JobState.DONE
+
+    # ... also when the job was known before
+    thread, answers = asking_jobs(connected)
+    answer(connected, [job_dict("running")])
+    notify(connected, JobStateChangedEvent(job_id="j1", state="done"))
+    thread.join(5)
+    assert answers == [[job]]
+    assert job.state == JobState.DONE
+
+
+def test_event_received_before_the_answer(connected):
+    """An event sent while the server answers (with the state it read
+    before) is applied again to the answer"""
+    thread, answers = asking_jobs(connected)
+    answer(connected, [job_dict("scheduled")])
+    thread.join(5)
+    ((job,),) = answers
+
+    thread, answers = asking_jobs(connected)
+    notify(connected, JobStateChangedEvent(job_id="j1", state="running"))
+    notify(connected, JobProgressEvent(job_id="j1", progress=0.5))
+    assert job.state == JobState.RUNNING
+    answer(connected, [job_dict("scheduled")])
+    thread.join(5)
+
+    assert answers == [[job]]
+    assert job.state == JobState.RUNNING
+    assert job.progress[0].progress == 0.5
+
+    # The events received before the request are not: the answer is newer
+    thread, answers = asking_jobs(connected)
+    answer(connected, [job_dict("done")])
+    thread.join(5)
+    assert job.state == JobState.DONE
+
+
+def test_experiment_event_received_before_the_answer(connected):
+    """Same for the events about the jobs of an experiment"""
+    answers: list = []
+    thread = threading.Thread(
+        target=lambda: answers.append(connected.get_experiment("exp"))
+    )
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not connected._stdin.getvalue():
+        assert time.monotonic() < deadline, "request not sent"
+        time.sleep(0.001)
+
+    notify(connected, job_state("j1", "done"))
+    answer(
+        connected,
+        {
+            "experiment_id": "exp",
+            "run_id": "run",
+            "status": "running",
+            "job_states": {"j1": "running", "j2": "done"},
+            "total_jobs": 2,
+        },
+    )
+    thread.join(5)
+
+    (exp,) = answers
+    assert (exp.total_jobs, exp.finished_jobs, exp.failed_jobs) == (2, 2, 0)

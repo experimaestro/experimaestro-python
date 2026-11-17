@@ -56,7 +56,8 @@ class QueryCache:
         self.ttl = ttl
         self._entries: dict[Hashable, CacheEntry] = {}
         self._lock = threading.Lock()
-        #: Incremented whenever entries are dropped (see :meth:`put`)
+        #: Incremented whenever the state the answers derive from changes in
+        #: a way the cached entries cannot follow (see :meth:`put`)
         self._generation = 0
         self.hits = 0
         self.misses = 0
@@ -94,11 +95,24 @@ class QueryCache:
         Does nothing if the entry is gone. Used to keep cached answers up to
         date when an event carries enough information to extend them, instead
         of dropping them and reading the state again.
+
+        An answer being computed meanwhile is not there to be updated: the
+        caller must :meth:`touch` the cache, so that it is not stored.
         """
         with self._lock:
             entry = self._entries.get(key)
             if entry is not None:
                 updater(entry.value)
+
+    def touch(self) -> None:
+        """Tell that the state changed, without dropping any entry
+
+        Called when a change is applied to the cached entries in place (see
+        :meth:`update`): the answers computed meanwhile from the previous
+        state would miss it, so they are not stored (see :meth:`put`).
+        """
+        with self._lock:
+            self._generation += 1
 
     def drop(self, key: Hashable) -> None:
         """Drop a single entry"""
@@ -108,8 +122,8 @@ class QueryCache:
 
     @property
     def generation(self) -> int:
-        """Changes whenever entries are dropped: to be read before computing a
-        value given to :meth:`put`"""
+        """Changes whenever the state changes (entries dropped, or updated in
+        place): to be read before computing a value given to :meth:`put`"""
         with self._lock:
             return self._generation
 
@@ -120,21 +134,28 @@ class QueryCache:
         *,
         experiment_id: str | None,
         generation: int | None = None,
-    ) -> None:
+        copy: Callable[[Any], Any] | None = None,
+    ) -> Any:
         """Store `value` for `key`, tagged with the experiment it derives from
 
         Args:
             generation: The :attr:`generation` read before computing the
-                value; if entries were dropped since, the state changed while
-                the value was computed, which might then be stale: it is not
-                stored
+                value; if the state changed since, the value might be stale
+                (or miss an update applied in place to the entries): it is
+                not stored
+            copy: Applied to the value while the lock is held (see :meth:`get`)
+
+        Returns:
+            The value (its copy, if `copy` is given)
         """
         with self._lock:
-            if generation is not None and generation != self._generation:
-                return
-            self._entries[key] = CacheEntry(
-                value=value, experiment_id=experiment_id, timestamp=time.monotonic()
-            )
+            if generation is None or generation == self._generation:
+                self._entries[key] = CacheEntry(
+                    value=value,
+                    experiment_id=experiment_id,
+                    timestamp=time.monotonic(),
+                )
+            return copy(value) if copy is not None else value
 
     def invalidate(self, experiment_id: str | None = None) -> None:
         """Drop cached queries

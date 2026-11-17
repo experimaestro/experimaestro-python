@@ -21,6 +21,7 @@ from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from abc import ABC, abstractmethod
+from types import MappingProxyType
 from typing import Any, Optional, TYPE_CHECKING
 from collections.abc import Callable, Collection, Hashable, Mapping
 
@@ -934,6 +935,12 @@ class OfflineStateProvider(StateProvider):
     def __init__(self):
         """Initialize offline state provider with caches and listener management"""
         super().__init__()  # Initialize state listener management
+        # Guards the cached jobs and experiments (the caches, and what the
+        # events and the answers read again change in the cached objects):
+        # an event and an answer about the same object are applied one after
+        # the other. Never held while a query is answered (see _cached_query)
+        # nor while the listeners are notified.
+        self._cache_lock = threading.RLock()
         self._init_job_cache()
         self._init_experiment_cache()
         self._query_cache = QueryCache()
@@ -982,13 +989,18 @@ class OfflineStateProvider(StateProvider):
                 value = self._query_cache.get(key, copy)
                 if value is not MISSING:
                     return value
-            # Not stored if the state changed while fetching
+            # Not stored if the state changed while fetching: the events
+            # applied meanwhile could not update an answer that was not
+            # cached yet, which might miss them
             generation = self._query_cache.generation
             value = fetch()
-            self._query_cache.put(
-                key, value, experiment_id=experiment_id, generation=generation
+            return self._query_cache.put(
+                key,
+                value,
+                experiment_id=experiment_id,
+                generation=generation,
+                copy=copy,
             )
-        return copy(value) if copy is not None else value
 
     def invalidate_caches(self, experiment_id: str | None = None) -> None:
         """Drop cached queries, and the cached objects they are built from
@@ -1306,21 +1318,20 @@ class OfflineStateProvider(StateProvider):
         # Job cache: keyed by "{hash8}:{job_id}" where hash8 = task_id_hash(task_id)
         # This matches the entity_id format from job_entity_id_extractor / EventReader
         self._job_cache: dict[str, "MockJob"] = {}
-        self._job_cache_lock = threading.Lock()
 
     def _clear_job_cache(self) -> None:
         """Clear the job cache"""
-        with self._job_cache_lock:
+        with self._cache_lock:
             self._job_cache.clear()
 
     def _get_cached_job(self, full_id: str) -> Optional["MockJob"]:
         """Get a job from cache by full_id"""
-        with self._job_cache_lock:
+        with self._cache_lock:
             return self._job_cache.get(full_id)
 
     def _cache_job(self, full_id: str, job: "MockJob") -> None:
         """Add a job to the cache"""
-        with self._job_cache_lock:
+        with self._cache_lock:
             self._job_cache[full_id] = job
 
     def _get_or_load_job(self, full_id: str, *args, **kwargs) -> "MockJob":
@@ -1333,7 +1344,7 @@ class OfflineStateProvider(StateProvider):
             full_id: Job full identifier (task_id:job_id)
             *args, **kwargs: Passed to _create_job and _on_cached_job_found
         """
-        with self._job_cache_lock:
+        with self._cache_lock:
             cached = self._job_cache.get(full_id)
             if cached is not None:
                 self._on_cached_job_found(cached, *args, **kwargs)
@@ -1360,12 +1371,11 @@ class OfflineStateProvider(StateProvider):
         """Initialize experiment cache - call from subclass __init__"""
         # Experiment cache: (experiment_id, run_id) -> MockExperiment
         self._experiment_cache: dict[tuple[str, str], "MockExperiment"] = {}
-        self._experiment_cache_lock = threading.Lock()
 
     def _clear_experiment_cache_all(self) -> None:
         """Clear the entire experiment cache (and the queries built from it)"""
         self._query_cache.clear()
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             self._experiment_cache.clear()
 
     def _clear_experiment_cache(self, experiment_id: str) -> None:
@@ -1376,7 +1386,7 @@ class OfflineStateProvider(StateProvider):
         dropped as well.
         """
         self._query_cache.invalidate(experiment_id)
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             keys_to_remove = [
                 k for k in self._experiment_cache if k[0] == experiment_id
             ]
@@ -1387,14 +1397,14 @@ class OfflineStateProvider(StateProvider):
         self, experiment_id: str, run_id: str
     ) -> Optional["MockExperiment"]:
         """Get an experiment from cache"""
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             return self._experiment_cache.get((experiment_id, run_id))
 
     def _cache_experiment(
         self, experiment_id: str, run_id: str, exp: "MockExperiment"
     ) -> None:
         """Add an experiment to the cache"""
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             self._experiment_cache[(experiment_id, run_id)] = exp
 
     def _get_or_load_experiment(
@@ -1412,7 +1422,7 @@ class OfflineStateProvider(StateProvider):
         """
         cache_key = (experiment_id, run_id)
 
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             cached = self._experiment_cache.get(cache_key)
             if cached is not None:
                 self._on_cached_experiment_found(cached, *args, **kwargs)
@@ -1465,6 +1475,11 @@ class OfflineStateProvider(StateProvider):
         entities exist: state/progress/carbon events update the cached job
         objects in place, so the query results that contain them stay valid.
 
+        The events that update the cached answers in place (a submitted job
+        is appended to the job lists, ...) cannot update the answers being
+        computed: the query cache is told (:meth:`QueryCache.touch`), and
+        does not store them.
+
         Subclasses may override this for additional logic.
         """
         from experimaestro.scheduler.state_status import (
@@ -1486,7 +1501,7 @@ class OfflineStateProvider(StateProvider):
             event, (JobStateChangedEvent, JobProgressEvent, CarbonMetricsEvent)
         ):
             job_id = event.job_id
-            with self._job_cache_lock:
+            with self._cache_lock:
                 # Find job in cache by job_id
                 for full_id, job in self._job_cache.items():
                     if job.identifier == job_id:
@@ -1525,10 +1540,12 @@ class OfflineStateProvider(StateProvider):
         # to keep the started service instances of the other runs)
         elif isinstance(event, ServiceStateChangedEvent):
             self._apply_to_cached_experiments(event)
+            self._query_cache.touch()
             self._update_cached_service_state(event)
 
         elif isinstance(event, ServiceAddedEvent):
             self._apply_to_cached_experiments(event)
+            self._query_cache.touch()
             self._drop_cached_services(event)
 
     def _cached_services_of(
@@ -1571,7 +1588,7 @@ class OfflineStateProvider(StateProvider):
         experiment list current. Each run ignores the events of the other
         runs (see :meth:`MockExperiment.apply_event`).
         """
-        with self._experiment_cache_lock:
+        with self._cache_lock:
             experiments = [
                 exp
                 for (experiment_id, _), exp in self._experiment_cache.items()
@@ -1586,6 +1603,9 @@ class OfflineStateProvider(StateProvider):
         Called for the job submissions and the actions added to a run (see
         :meth:`apply_event`), and by the providers that update their cached
         experiments themselves.
+
+        The answers being computed are not cached yet, and miss the update:
+        they are not stored (:meth:`QueryCache.touch`).
         """
         from experimaestro.scheduler.state_status import (
             ActionAddedEvent,
@@ -1595,12 +1615,15 @@ class OfflineStateProvider(StateProvider):
 
         match event:
             case ExperimentJobStateEvent(scheduler_state="submitted", task_id=task_id):
+                self._query_cache.touch()
                 if task_id:
                     self._add_submitted_job(event)
             case JobSubmittedEvent(task_id=task_id):
+                self._query_cache.touch()
                 if task_id:
                     self._add_submitted_job(event)
             case ActionAddedEvent():
+                self._query_cache.touch()
                 self._drop_run_objects(event.experiment_id, event.run_id or None)
 
     def _drop_run_objects(self, experiment_id: str, run_id: str | None) -> None:
@@ -1630,7 +1653,7 @@ class OfflineStateProvider(StateProvider):
         from experimaestro.scheduler.state_status import task_id_hash
 
         cache_key = f"{task_id_hash(event.task_id)}:{event.job_id}"
-        with self._job_cache_lock:
+        with self._cache_lock:
             job = self._job_cache.get(cache_key)
             if job is None:
                 job = MockJob(
@@ -2268,6 +2291,14 @@ class MockExperiment(BaseExperiment):
     - _job_states: Dict[str, JobState] tracks the latest known state of each job
       from experiment events (ExperimentJobStateEvent). This is used to provide
       _experiment_status to MockJob instances when they are loaded.
+
+    Thread safety: an experiment is updated by the events (file watcher or
+    connection thread) while the UIs and the queries read it from other
+    threads. Its dictionaries are only changed with ``_lock`` held, and the
+    properties return copies made with it held (``job_infos``: a read-only
+    snapshot, made again only after a job is added), never the dictionaries
+    themselves -- iterating over those would fail when a job, a service or an
+    action is added meanwhile.
     """
 
     def __init__(
@@ -2294,12 +2325,16 @@ class MockExperiment(BaseExperiment):
     ):
         self.workdir = workdir
         self.run_id = run_id
+        # Held while the dictionaries below are read as a whole or changed
+        self._lock = threading.RLock()
         self._status = status
         self._events_count = events_count
         self._hostname = hostname
         self._started_at = started_at
         self._ended_at = ended_at
         self._job_infos = job_infos or {}
+        # Read-only copy of _job_infos given by job_infos (None: to be made)
+        self._job_infos_snapshot: Mapping[str, "ExperimentJobInformation"] | None = None
         self._services = services or {}
         self._actions: dict[str, "BaseAction"] = {}
         self._dependencies = dependencies or {}
@@ -2344,23 +2379,60 @@ class MockExperiment(BaseExperiment):
         self._status = value
 
     @property
-    def job_infos(self) -> dict[str, "ExperimentJobInformation"]:
+    def job_infos(self) -> Mapping[str, "ExperimentJobInformation"]:
         """Lightweight job info from jobs.jsonl (job_id, task_id, tags, timestamp)
+
+        A read-only snapshot, safe to iterate over while events add jobs (use
+        :meth:`add_job_info` to add one).
 
         Lazy-loaded: when created from from_disk() with status.json, the
         jobs.jsonl is not read until this property is first accessed.
         """
-        if not self._jobs_jsonl_loaded:
-            self._load_jobs_jsonl()
-        return self._job_infos
+        with self._lock:
+            if not self._jobs_jsonl_loaded:
+                self._load_jobs_jsonl()
+            if self._job_infos_snapshot is None:
+                self._job_infos_snapshot = MappingProxyType(dict(self._job_infos))
+            return self._job_infos_snapshot
+
+    def add_job_info(
+        self, job_info: "ExperimentJobInformation", *, replace: bool = True
+    ) -> bool:
+        """Add the information about a job of the run
+
+        Args:
+            replace: Whether to replace the information already known about
+                the job
+
+        Returns:
+            Whether the information was stored
+        """
+        with self._lock:
+            if not self._jobs_jsonl_loaded:
+                self._load_jobs_jsonl()
+            if not replace and job_info.job_id in self._job_infos:
+                return False
+            self._job_infos[job_info.job_id] = job_info
+            self._job_infos_snapshot = None
+            return True
 
     @property
-    def services(self) -> dict[str, "BaseService"]:
-        return self._services
+    def job_states(self) -> dict[str, JobState]:
+        """The states of the jobs in the run (a copy)"""
+        with self._lock:
+            return dict(self._job_states)
 
     @property
-    def actions(self) -> dict[str, "BaseAction"]:
-        return self._actions
+    def services(self) -> Mapping[str, "BaseService"]:
+        """The services of the run (a read-only copy)"""
+        with self._lock:
+            return MappingProxyType(dict(self._services))
+
+    @property
+    def actions(self) -> Mapping[str, "BaseAction"]:
+        """The actions of the run (a read-only copy)"""
+        with self._lock:
+            return MappingProxyType(dict(self._actions))
 
     @property
     def tags(self) -> dict[str, dict[str, str]]:
@@ -2379,7 +2451,8 @@ class MockExperiment(BaseExperiment):
             for job_id, job_info in self.job_infos.items()
             if job_info.depends_on
         }
-        dependencies.update(self._dependencies)
+        with self._lock:
+            dependencies.update(self._dependencies)
         return dependencies
 
     @property
@@ -2400,10 +2473,11 @@ class MockExperiment(BaseExperiment):
 
     @property
     def total_jobs(self) -> int:
-        if self._total_jobs > 0:
-            return self._total_jobs
-        # Jobs can be known by their information, their state, or both
-        return len(self.job_infos.keys() | self._job_states.keys())
+        with self._lock:
+            if self._total_jobs > 0:
+                return self._total_jobs
+            # Jobs can be known by their information, their state, or both
+            return len(self.job_infos.keys() | self._job_states.keys())
 
     @property
     def finished_jobs(self) -> int:
@@ -2420,7 +2494,7 @@ class MockExperiment(BaseExperiment):
 
     def _serialize_job_states(self) -> dict[str, str]:
         result = {}
-        for job_id, state in self._job_states.items():
+        for job_id, state in self.job_states.items():
             if state.is_error() and state.failure_reason is not None:
                 result[job_id] = f"error:{state.failure_reason.name}"
             else:
@@ -2450,25 +2524,27 @@ class MockExperiment(BaseExperiment):
         Returns:
             True if a tracked state existed and was updated, False otherwise.
         """
-        if job_id not in self._job_states and job_id not in self._job_infos:
-            return False
+        with self._lock:
+            if job_id not in self._job_states and job_id not in self.job_infos:
+                return False
 
-        previous_state = self._job_states.get(job_id)
-        new_state = JobStateError(JobFailureStatus.DELETED)
-        self._job_states[job_id] = new_state
+            previous_state = self._job_states.get(job_id)
+            new_state = JobStateError(JobFailureStatus.DELETED)
+            self._job_states[job_id] = new_state
 
-        if previous_state == JobState.DONE:
-            self._finished_jobs = max(0, self._finished_jobs - 1)
-            self._failed_jobs += 1
-        elif previous_state is None or not previous_state.is_error():
-            self._failed_jobs += 1
-        return True
+            if previous_state == JobState.DONE:
+                self._finished_jobs = max(0, self._finished_jobs - 1)
+                self._failed_jobs += 1
+            elif previous_state is None or not previous_state.is_error():
+                self._failed_jobs += 1
+            return True
 
     # state_dict() is inherited from BaseExperiment
 
     def _load_jobs_jsonl(self) -> None:
-        """Load job infos from jobs.jsonl (deferred loading)"""
+        """Load job infos from jobs.jsonl (deferred loading, ``_lock`` held)"""
         self._jobs_jsonl_loaded = True
+        self._job_infos_snapshot = None
         if self._jobs_jsonl_path is None:
             return
         jobs_jsonl_path = self._jobs_jsonl_path
@@ -2728,8 +2804,9 @@ class MockExperiment(BaseExperiment):
 
     def set_job_states(self, job_states: dict[str, JobState]) -> None:
         """Replace the tracked job states (and the counters derived from them)"""
-        self._job_states = job_states
-        self._finished_jobs, self._failed_jobs = self._count_job_states(job_states)
+        with self._lock:
+            self._job_states = job_states
+            self._finished_jobs, self._failed_jobs = self._count_job_states(job_states)
 
     def _count_new_job(self, job_id: str) -> None:
         """Count a job that was not known yet in the total
@@ -2779,13 +2856,14 @@ class MockExperiment(BaseExperiment):
 
         Returns whether the run state changed.
         """
-        run_state = self._job_states.get(job.identifier)
-        if run_state is None or run_state.finished() or not job.state.finished():
-            return False
-        if StateProvider._is_previous_result(job, self, run_state):
-            return False
-        self._update_job_state(job.identifier, job.state, merge_mode=False)
-        return True
+        with self._lock:
+            run_state = self._job_states.get(job.identifier)
+            if run_state is None or run_state.finished() or not job.state.finished():
+                return False
+            if StateProvider._is_previous_result(job, self, run_state):
+                return False
+            self._update_job_state(job.identifier, job.state, merge_mode=False)
+            return True
 
     def apply_event(self, event: "EventBase", merge_mode: bool = False) -> None:
         """Apply an event to update experiment state
@@ -2795,6 +2873,11 @@ class MockExperiment(BaseExperiment):
             merge_mode: If True, don't overwrite fields that are already set
                        (except for timestamps which should use the latest value)
         """
+        with self._lock:
+            self._apply_event(event, merge_mode)
+
+    def _apply_event(self, event: "EventBase", merge_mode: bool) -> None:
+        """Apply an event (``_lock`` held)"""
         from experimaestro.scheduler.state_status import (
             ActionAddedEvent,
             ExperimentJobStateEvent,
@@ -2820,11 +2903,13 @@ class MockExperiment(BaseExperiment):
 
             if not merge_mode:
                 self._count_new_job(event.job_id)
-            self._job_infos[event.job_id] = ExperimentJobInformation(
-                job_id=event.job_id,
-                task_id=event.task_id,
-                tags=event.tags or {},
-                timestamp=event.timestamp,
+            self.add_job_info(
+                ExperimentJobInformation(
+                    job_id=event.job_id,
+                    task_id=event.task_id,
+                    tags=event.tags or {},
+                    timestamp=event.timestamp,
+                )
             )
             if event.depends_on:
                 self._dependencies[event.job_id] = event.depends_on
@@ -2873,11 +2958,17 @@ class MockExperiment(BaseExperiment):
             # JobSubmittedEvent) — only when tags/depends are present
             if event.tags or event.depends_on:
                 if not (merge_mode and event.job_id in self._job_infos):
-                    self._job_infos[event.job_id] = ExperimentJobInformation(
-                        job_id=event.job_id,
-                        task_id=event.task_id,
-                        tags={t.key: t.value for t in event.tags} if event.tags else {},
-                        timestamp=event.timestamp,
+                    self.add_job_info(
+                        ExperimentJobInformation(
+                            job_id=event.job_id,
+                            task_id=event.task_id,
+                            tags=(
+                                {t.key: t.value for t in event.tags}
+                                if event.tags
+                                else {}
+                            ),
+                            timestamp=event.timestamp,
+                        )
                     )
                     if event.depends_on:
                         self._dependencies[event.job_id] = event.depends_on

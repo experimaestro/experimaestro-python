@@ -24,7 +24,7 @@ from concurrent.futures import Future, TimeoutError as FutureTimeoutError
 from datetime import datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from collections.abc import Callable, Hashable
 
 from termcolor import colored
@@ -41,8 +41,10 @@ from experimaestro.scheduler.state_status import (
     ConnectionState,
     ConnectionStateEvent,
     EventBase,
+    ExperimentEventBase,
     ExperimentJobStateEvent,
     ExperimentUpdatedEvent,
+    JobEventBase,
     JobProgressEvent,
     JobStateChangedEvent,
     RunUpdatedEvent,
@@ -713,6 +715,10 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._listener_lock = threading.Lock()
 
         self._response_handlers: dict[int, Future] = {}
+        #: How to read the answers of the pending requests into the caches
+        #: (see _call): the decoder, and the number of events received when
+        #: the request was sent
+        self._response_decoders: dict[int, tuple[Callable[[Any, int], Any], int]] = {}
         #: Method and start time of the pending requests (for the trace)
         self._pending_calls: dict[int, tuple[RPCMethod, float]] = {}
         self._response_lock = threading.Lock()
@@ -750,14 +756,12 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._pending_events: list[EventBase] = []
         self._pending_events_lock = threading.Lock()
 
-        # Job state events of the experiments, numbered as received: those
-        # received while an experiment is fetched are applied again to the
-        # answer (see _replay_job_states)
-        self._job_state_events: deque[tuple[int, ExperimentJobStateEvent]] = deque(
-            maxlen=10_000
-        )
+        # Events about the jobs and the experiments, numbered as received:
+        # those received while a request is answered are applied again to
+        # the answer (see _replay_events)
+        self._recent_events: deque[tuple[int, EventBase]] = deque(maxlen=10_000)
         self._events_received = 0
-        self._job_state_events_lock = threading.Lock()
+        self._recent_events_lock = threading.Lock()
         self._notify_interval = 2.0  # Seconds between notification batches
 
         # Job and experiment caches are inherited from OfflineStateProvider
@@ -984,6 +988,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             futures = list(self._response_handlers.values())
             self._response_handlers.clear()
             self._pending_calls.clear()
+            self._response_decoders.clear()
         for future in futures:
             if not future.done():
                 future.set_exception(error)
@@ -1265,6 +1270,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         with self._response_lock:
             future = self._response_handlers.pop(response.id, None)
             call = self._pending_calls.pop(response.id, None)
+            decoder = self._response_decoders.pop(response.id, None)
 
         if call is not None:
             method, start = call
@@ -1286,8 +1292,21 @@ class SSHStateProviderClient(OfflineStateProvider):
                     f"RPC error {response.error.code}: {response.error.message}"
                 )
             )
-        else:
+        elif decoder is None:
             future.set_result(response.result)
+        else:
+            # Read into the caches here, in the order of the messages: the
+            # events received next are applied after the answer, not before
+            # (the caller reads the result later, from another thread)
+            decode, received = decoder
+            try:
+                with self._cache_lock:
+                    result = decode(response.result, received)
+            except Exception as e:
+                logger.exception("Error reading the answer #%s", response.id)
+                future.set_exception(e)
+            else:
+                future.set_result(result)
 
     def _handle_notification(self, notification: RPCNotification):
         """Handle a notification from the server
@@ -1304,11 +1323,12 @@ class SSHStateProviderClient(OfflineStateProvider):
         event = self._notification_to_event(method, params)
         if event:
             # Apply event to cached objects (like WorkspaceStateProvider does)
-            with self._job_state_events_lock:
+            with self._recent_events_lock:
                 self._events_received += 1
-                if isinstance(event, ExperimentJobStateEvent):
-                    self._job_state_events.append((self._events_received, event))
-            self._apply_event_to_cache(event)
+                if isinstance(event, self._REPLAYED_EVENTS):
+                    self._recent_events.append((self._events_received, event))
+            with self._cache_lock:
+                self._apply_event_to_cache(event)
 
             with self._pending_events_lock:
                 self._pending_events.append(event)
@@ -1392,15 +1412,27 @@ class SSHStateProviderClient(OfflineStateProvider):
             except Exception as e:
                 logger.exception("Error in listener: %s", e)
 
-    def _call(self, method: RPCMethod, params: dict) -> Future:
+    def _call(
+        self,
+        method: RPCMethod,
+        params: dict,
+        decode: Callable[[Any, int], Any] | None = None,
+    ) -> Future:
         """Send an RPC request and return a Future for the response
 
         Args:
             method: RPC method to call
             params: Method parameters
+            decode: Reads the answer into the cached jobs and experiments:
+                called with the answer and the number of events received
+                when the request was sent (see :meth:`_replay_events`), by
+                the thread reading the messages of the server -- so that the
+                answer and the events are applied in the order they are
+                received. It must not send requests.
 
         Returns:
-            Future that resolves to the response result
+            Future that resolves to the response result (as returned by
+            `decode`, if given)
         """
         if not self.supports(method):
             future = Future()
@@ -1424,6 +1456,8 @@ class SSHStateProviderClient(OfflineStateProvider):
             future = Future()
             self._response_handlers[request_id] = future
             self._pending_calls[request_id] = (method, time.perf_counter())
+            if decode is not None:
+                self._response_decoders[request_id] = (decode, self._events_received)
 
         request_json = create_request(method, params, request_id)
         try:
@@ -1433,6 +1467,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             with self._response_lock:
                 self._response_handlers.pop(request_id, None)
                 self._pending_calls.pop(request_id, None)
+                self._response_decoders.pop(request_id, None)
             future.set_exception(e)
 
         return future
@@ -1498,16 +1533,23 @@ class SSHStateProviderClient(OfflineStateProvider):
         """Whether the remote server handles a method (older ones lack some)"""
         return method in self._server_methods
 
-    def _call_sync(self, method: RPCMethod, params: dict, timeout: float | None = None):
+    def _call_sync(
+        self,
+        method: RPCMethod,
+        params: dict,
+        timeout: float | None = None,
+        decode: Callable[[Any, int], Any] | None = None,
+    ):
         """Send an RPC request and wait for the response
 
         Args:
             method: RPC method to call
             params: Method parameters
             timeout: Request timeout in seconds
+            decode: Reads the answer into the caches (see :meth:`_call`)
 
         Returns:
-            Response result
+            Response result (as returned by `decode`, if given)
 
         Raises:
             TimeoutError: If the request times out
@@ -1515,7 +1557,7 @@ class SSHStateProviderClient(OfflineStateProvider):
         """
         if timeout is None:
             timeout = self.request_timeout
-        future = self._call(method, params)
+        future = self._call(method, params, decode)
         try:
             return future.result(timeout=timeout)
         except FutureTimeoutError:
@@ -1549,29 +1591,27 @@ class SSHStateProviderClient(OfflineStateProvider):
             "refresh": refresh,
             "job_infos": False,
         }
-        received = self._events_received
-        result = self._call_sync(RPCMethod.GET_EXPERIMENTS, params)
-        return [self._get_or_load_experiment(d, received) for d in result]
+        return self._call_sync(
+            RPCMethod.GET_EXPERIMENTS, params, decode=self._decode_experiments
+        )
 
     def _fetch_experiment(
         self, experiment_id: str, *, refresh: bool = False
     ) -> BaseExperiment | None:
         """Get a specific experiment by ID"""
         params = {"experiment_id": experiment_id, "refresh": refresh}
-        received = self._events_received
-        result = self._call_sync(RPCMethod.GET_EXPERIMENT, params)
-        if result is None:
-            return None
-        return self._get_or_load_experiment(result, received)
+        return self._call_sync(
+            RPCMethod.GET_EXPERIMENT, params, decode=self._decode_experiment
+        )
 
     def _fetch_experiment_runs(
         self, experiment_id: str, *, refresh: bool = False
     ) -> list[BaseExperiment]:
         """Get all runs for an experiment"""
         params = {"experiment_id": experiment_id, "refresh": refresh}
-        received = self._events_received
-        result = self._call_sync(RPCMethod.GET_EXPERIMENT_RUNS, params)
-        return [self._get_or_load_experiment(d, received) for d in result]
+        return self._call_sync(
+            RPCMethod.GET_EXPERIMENT_RUNS, params, decode=self._decode_experiments
+        )
 
     def _fetch_current_run(
         self, experiment_id: str, *, refresh: bool = False
@@ -1603,8 +1643,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             "since": serialize_datetime(since),
             "refresh": refresh,
         }
-        result = self._call_sync(RPCMethod.GET_JOBS, params)
-        return [self._get_or_load_job(d) for d in result]
+        return self._call_sync(RPCMethod.GET_JOBS, params, decode=self._decode_jobs)
 
     def _fetch_job(
         self, task_id: str, job_id: str, *, refresh: bool = False
@@ -1615,10 +1654,7 @@ class SSHStateProviderClient(OfflineStateProvider):
             "job_id": job_id,
             "refresh": refresh,
         }
-        result = self._call_sync(RPCMethod.GET_JOB, params)
-        if result is None:
-            return None
-        return self._get_or_load_job(result)
+        return self._call_sync(RPCMethod.GET_JOB, params, decode=self._decode_job)
 
     def _fetch_all_jobs(
         self,
@@ -1635,16 +1671,16 @@ class SSHStateProviderClient(OfflineStateProvider):
             "since": serialize_datetime(since),
             "refresh": refresh,
         }
-        result = self._call_sync(RPCMethod.GET_ALL_JOBS, params)
-        return [self._get_or_load_job(d) for d in result]
+        return self._call_sync(RPCMethod.GET_ALL_JOBS, params, decode=self._decode_jobs)
 
     def _fetch_orphan_jobs(self, *, refresh: bool = False, **kwargs) -> list[BaseJob]:
         """Get orphan jobs (not referenced by any experiment)"""
         try:
-            result = self._call_sync(
-                RPCMethod.GET_ORPHAN_JOBS, {"refresh": refresh, **kwargs}
+            return self._call_sync(
+                RPCMethod.GET_ORPHAN_JOBS,
+                {"refresh": refresh, **kwargs},
+                decode=self._decode_jobs,
             )
-            return [self._get_or_load_job(d) for d in result]
         except RuntimeError:
             # Server may not support this method (old version)
             return []
@@ -1652,8 +1688,9 @@ class SSHStateProviderClient(OfflineStateProvider):
     def _fetch_stray_jobs(self, *, refresh: bool = False) -> list[BaseJob]:
         """Get stray jobs (running jobs not in latest run)"""
         try:
-            result = self._call_sync(RPCMethod.GET_STRAY_JOBS, {"refresh": refresh})
-            return [self._get_or_load_job(d) for d in result]
+            return self._call_sync(
+                RPCMethod.GET_STRAY_JOBS, {"refresh": refresh}, decode=self._decode_jobs
+            )
         except RuntimeError:
             # Server may not support this method (old version)
             return []
@@ -1714,7 +1751,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         else:
             runs = self.get_experiment_runs(experiment_id, refresh=refresh)
             exp = next((run for run in runs if run.run_id == run_id), None)
-        return exp.job_infos if exp is not None else {}
+        # A copy: the cached answer is updated in place by the events
+        return dict(exp.job_infos) if exp is not None else {}
 
     def _fetch_services_from_storage(
         self, experiment_id: str | None, run_id: str | None
@@ -1968,15 +2006,8 @@ class SSHStateProviderClient(OfflineStateProvider):
         self._translate_job_path(d)
         job.update_from_state_dict(d)
 
-    def _get_or_load_experiment(
-        self, d: dict, received: int | None = None
-    ) -> MockExperiment:
-        """Get or load experiment from dict (uses base class caching)
-
-        Args:
-            received: The number of events received when the dict was asked
-                for (see :meth:`_replay_job_states`)
-        """
+    def _get_or_load_experiment(self, d: dict) -> MockExperiment:
+        """Get or load experiment from dict (uses base class caching)"""
         experiment_id = d.get("experiment_id", "")
         run_id = d.get("run_id", "")
 
@@ -1984,27 +2015,82 @@ class SSHStateProviderClient(OfflineStateProvider):
             # Can't cache without identifiers, just create
             return self._create_experiment_from_dict(d)
 
-        exp = super()._get_or_load_experiment(experiment_id, run_id, d=d)
-        if received is not None:
-            self._replay_job_states(exp, received)
-        return exp
+        return super()._get_or_load_experiment(experiment_id, run_id, d=d)
 
-    def _replay_job_states(self, exp: MockExperiment, received: int) -> None:
-        """Apply again the job state events received after ``received``
+    # -------------------------------------------------------------------------
+    # Answers read into the caches (see _call: called by the thread reading
+    # the messages of the server, with the cache lock held)
+    # -------------------------------------------------------------------------
 
-        The server answers with the state it had when handling the request:
-        the job state events it sent meanwhile may have been applied to the
-        cached experiment before the answer replaced its job states (and
-        nothing would send them again).
+    #: Events applied again to the answers they may be missing from (see
+    #: _replay_events): those updating the cached jobs and experiments
+    _REPLAYED_EVENTS = (JobEventBase, ExperimentEventBase)
+
+    def _decode_jobs(self, result: list[dict], received: int) -> list[BaseJob]:
+        jobs = [self._get_or_load_job(d) for d in result]
+        self._replay_events(received, jobs=jobs)
+        return jobs
+
+    def _decode_job(self, result: dict | None, received: int) -> BaseJob | None:
+        if result is None:
+            return None
+        return self._decode_jobs([result], received)[0]
+
+    def _decode_experiments(
+        self, result: list[dict], received: int
+    ) -> list[BaseExperiment]:
+        experiments = [self._get_or_load_experiment(d) for d in result]
+        self._replay_events(received, experiments=experiments)
+        return experiments
+
+    def _decode_experiment(
+        self, result: dict | None, received: int
+    ) -> BaseExperiment | None:
+        if result is None:
+            return None
+        return self._decode_experiments([result], received)[0]
+
+    def _replay_events(
+        self,
+        received: int,
+        *,
+        jobs: list[MockJob] | None = None,
+        experiments: list[MockExperiment] | None = None,
+    ) -> None:
+        """Apply again, to the jobs and experiments of an answer, the events
+        received since its request was sent (``received`` events then)
+
+        The server answers with the state it had when handling the request,
+        which replaces the state of the cached objects: the events it sent
+        meanwhile, already applied, may be missing from the answer (and
+        nothing would send them again). An event the answer already took
+        into account is applied twice, which changes nothing; an event older
+        than the answer is followed by the events that came after it.
         """
-        with self._job_state_events_lock:
+        with self._recent_events_lock:
             events = [
-                event
-                for number, event in self._job_state_events
-                if number > received and event.experiment_id == exp.experiment_id
+                event for number, event in self._recent_events if number > received
             ]
+        if not events:
+            return
+
+        jobs_by_id: dict[str, list[MockJob]] = {}
+        for job in jobs or []:
+            jobs_by_id.setdefault(job.identifier, []).append(job)
+        experiments_by_id: dict[str, list[MockExperiment]] = {}
+        for exp in experiments or []:
+            experiments_by_id.setdefault(exp.experiment_id, []).append(exp)
+
         for event in events:
-            exp.apply_event(event)
+            if isinstance(event, ExperimentEventBase):
+                # (each run ignores the events of the other runs)
+                for exp in experiments_by_id.get(event.experiment_id, ()):
+                    exp.apply_event(event)
+            if isinstance(
+                event, (JobStateChangedEvent, JobProgressEvent, CarbonMetricsEvent)
+            ):
+                for job in jobs_by_id.get(event.job_id, ()):
+                    job.apply_event(event)
 
     def _create_experiment(
         self, experiment_id: str, run_id: str, *, d: dict
@@ -2069,13 +2155,15 @@ class SSHStateProviderClient(OfflineStateProvider):
             from experimaestro.scheduler.interfaces import ExperimentJobInformation
 
             for job_id, info_dict in d["job_infos"].items():
-                if job_id not in exp.job_infos:
-                    exp.job_infos[job_id] = ExperimentJobInformation(
+                exp.add_job_info(
+                    ExperimentJobInformation(
                         job_id=job_id,
                         task_id=info_dict.get("task_id", ""),
                         tags=info_dict.get("tags", {}),
                         timestamp=info_dict.get("timestamp"),
-                    )
+                    ),
+                    replace=False,
+                )
 
     def _dict_to_service(self, d: dict) -> SSHMockService:
         """Convert a dictionary to an SSHMockService

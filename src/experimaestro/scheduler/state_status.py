@@ -1391,15 +1391,20 @@ class EventReader:
     def _on_file_deleted(self, path: Path) -> None:
         """Handle file deletion event from FileWatcher"""
         logger.debug("Detected deletion of event file: %s", path)
-        entity_id = self._extract_entity_id(path)
-        dir_config = self._find_dir_config(path)
-        # Remove from tailed pool
-        watch = self._find_watcher(path)
-        if watch:
-            watch.remove_tail(path)
-        self._file_positions.pop(path, None)
-        if entity_id:
-            self._handle_deletion(entity_id, path, dir_config)
+        # Serialised with the delivery of the events (see _process_lock): the
+        # deletion callback reads the consolidated state again, which the
+        # events being delivered by the other thread (read before the file
+        # was deleted, hence older) must not be applied over
+        with self._process_lock:
+            entity_id = self._extract_entity_id(path)
+            dir_config = self._find_dir_config(path)
+            # Remove from tailed pool
+            watch = self._find_watcher(path)
+            if watch:
+                watch.remove_tail(path)
+            self._file_positions.pop(path, None)
+            if entity_id:
+                self._handle_deletion(entity_id, path, dir_config)
 
     def _on_file_created(self, path: Path) -> None:
         """Handle file creation - ensure position is initialized before processing"""
