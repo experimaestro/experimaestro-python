@@ -25,7 +25,7 @@ classifiers = [
     "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11.5"
 dynamic = ["version"]
 dependencies = [
     "arpeggio >=2,<3",
