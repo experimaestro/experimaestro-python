@@ -8,6 +8,7 @@ import re
 import sys
 
 import click
+from rich_click import RichGroup
 
 from experimaestro.utils.atomic import atomic_write_json
 
@@ -769,7 +770,7 @@ def detect_cluster_info(cache: SlurmCommandCache | None = None) -> ClusterData: 
     )
 
 
-@click.group("slurm")
+@click.group("slurm", cls=RichGroup)
 def cli():
     """SLURM launcher commands."""
     pass

@@ -18,6 +18,7 @@ import copy
 import json
 import sys
 import click
+from rich_click import RichGroup, RichHelpConfiguration
 
 import logging
 from functools import cached_property, update_wrapper
@@ -170,7 +171,35 @@ def deprecated_alias(command: click.Command, new_name: str) -> click.Command:
     return alias
 
 
-@click.group()
+# --- Help: the commands, grouped in panels (rich-click; markup off, so that
+# the help strings are shown verbatim, and no colours when piped)
+
+EXPERIMENTS = "Experiments"
+WORKSPACE = "Workspace & jobs"
+PLUGINS = "Plugins"
+DEVELOPER = "Developer"
+
+HELP_CONFIG = RichHelpConfiguration(
+    text_markup=None,
+    text_paragraph_linebreaks="\n\n",
+    command_groups={
+        "cli": [
+            {"name": EXPERIMENTS, "commands": ["run", "experiments", "monitor"]},
+            {"name": WORKSPACE, "commands": ["workspace", "jobs"]},
+            {"name": PLUGINS, "commands": ["launchers", "connectors", "tokens"]},
+            {"name": DEVELOPER, "commands": ["tools", "version"]},
+        ]
+    },
+)
+
+
+class RootGroup(RichGroup):
+    """Rich help, but Click's error messages (on one line: no panel)"""
+
+    main = click.Group.main
+
+
+@click.group(cls=RootGroup, context_settings={"rich_help_config": HELP_CONFIG})
 @click.option("--quiet", is_flag=True, help="Be quiet")
 @click.option("--debug", is_flag=True, help="Be even more verbose (implies traceback)")
 @click.option(
@@ -311,7 +340,7 @@ def rpyc_server(unix_path, clean):
     start_server(unix_path, clean=clean)
 
 
-class Launchers(click.Group):
+class Launchers(RichGroup):
     """Dynamic command group for entry point discovery.
 
     Loads subcommands from entry points in the `experimaestro.{name}` group.

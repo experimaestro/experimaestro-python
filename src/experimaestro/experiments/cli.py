@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 import click
+from rich_click import RichCommand
 import yaml
 from termcolor import cprint
 
@@ -254,7 +255,7 @@ class SpecificationLoader:
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 @click.argument("yaml_file", metavar="YAML file", type=str)
-@click.command()
+@click.command(cls=RichCommand)
 def experiments_cli(  # noqa: C901
     yaml_file: str,
     xp_file: str,

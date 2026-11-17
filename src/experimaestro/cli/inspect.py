@@ -6,10 +6,11 @@ import sys
 from pathlib import Path
 
 import click
+from rich_click import RichCommand
 from termcolor import cprint
 
 
-@click.command(name="inspect")
+@click.command(name="inspect", cls=RichCommand)
 @click.argument("target", required=False, default=".")
 @click.option("-w", "--workspace", default=None, hidden=True)
 def inspect_command(target: str, workspace: str | None) -> None:

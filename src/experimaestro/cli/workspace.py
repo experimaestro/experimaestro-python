@@ -8,6 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import click
+from rich_click import RichCommand, RichGroup
 import yaml
 from termcolor import colored, cprint
 
@@ -19,7 +20,7 @@ from . import RunConfig, check_xp_path, root_config
 from .remote import RemoteCommand
 
 
-@click.group()
+@click.group(cls=RichGroup)
 def workspace():
     """Workspaces: list, clean up, migrate (alias: ws)"""
 
@@ -205,7 +206,7 @@ def _relative(path: Path, base: Path) -> str:
     ),
 )
 @click.argument("path", type=Path, callback=check_xp_path)
-@click.command(hidden=True)
+@click.command(hidden=True, cls=RichCommand)
 def orphans_alias(path: Path, clean: bool, size: bool, include_folders: bool):
     """Check for jobs that are not part of any experiment (deprecated)"""
     cprint("Deprecated: use `experimaestro workspace orphans` instead", "yellow")

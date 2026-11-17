@@ -46,6 +46,7 @@ dependencies = [
     "pytools >=2023.1.1,<2024",
     "pyyaml >=6.0.1,<7",
     "requests >=2.31,<3",
+    "rich-click >=1.9,<2",
     "rpyc >=5,<7",
     "sortedcontainers >=2.4,<3",
     "termcolor >=2.3,<3",

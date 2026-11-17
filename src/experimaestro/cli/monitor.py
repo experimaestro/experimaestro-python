@@ -4,6 +4,7 @@
 from pathlib import Path
 
 import click
+from rich_click import RichCommand
 from termcolor import cprint
 
 from experimaestro.settings import get_settings, get_workspace
@@ -135,7 +136,7 @@ def _configure_watcher(watcher: str, polling_interval: float):
         FileWatcherService.configure(WatcherType.POLLING, polling_interval)
 
 
-@click.command()
+@click.command(cls=RichCommand)
 @click.option(
     "--ssh",
     "ssh_target",
@@ -222,7 +223,7 @@ def monitor(
     )
 
 
-@click.command("ssh-monitor", hidden=True)
+@click.command("ssh-monitor", hidden=True, cls=RichCommand)
 @click.argument("host", type=str, required=False, default=None)
 @click.argument("remote_workdir", type=str, required=False, default=None)
 @click.option(

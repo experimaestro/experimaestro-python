@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import click
+from rich_click import RichGroup
 from termcolor import cprint
 
 import experimaestro.launcherfinder.registry as launcher_registry
@@ -15,7 +16,7 @@ from .refactor import refactor
 from .skill import install_skill
 
 
-@click.group()
+@click.group(cls=RichGroup)
 def tools():
     """Developer tools: documentation, launchers, refactoring, identifiers"""
 

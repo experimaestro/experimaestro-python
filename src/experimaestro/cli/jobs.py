@@ -4,6 +4,7 @@ __lazy_modules__ = ["experimaestro.scheduler"]  # PEP 810 (Python 3.15+)
 import subprocess
 from typing import TYPE_CHECKING
 import click
+from rich_click import RichGroup
 from pathlib import Path
 from termcolor import colored, cprint
 
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 
 @click.option("--workspace", default="", hidden=True, help="Experimaestro workspace")
 @click.option("--workdir", type=Path, default=None, hidden=True)
-@click.group()
+@click.group(cls=RichGroup)
 @click.pass_obj
 def jobs(
     cfg: RunConfig,

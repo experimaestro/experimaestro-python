@@ -5,6 +5,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import click
+from rich_click import RichGroup
 import jinja2
 
 from experimaestro.scriptbuilder import PythonScriptBuilder
@@ -173,7 +174,7 @@ class LauncherConfig:
 # =============================================================================
 
 
-@click.group("direct")
+@click.group("direct", cls=RichGroup)
 def direct_cli():
     """Direct launcher commands"""
     pass

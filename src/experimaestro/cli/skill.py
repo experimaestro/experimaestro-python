@@ -5,6 +5,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import click
+from rich_click import RichCommand
 from termcolor import cprint
 
 # Map of known targets to their skill directories
@@ -60,7 +61,7 @@ def _install_to(target: str, source: Path) -> None:
     cprint(f"  Installed to {dest}", "green")
 
 
-@click.command("install-skill")
+@click.command("install-skill", cls=RichCommand)
 @click.argument("targets", nargs=-1)
 @click.option("--list", "list_targets", is_flag=True, help="List available targets")
 def install_skill(targets: tuple[str, ...], list_targets: bool):

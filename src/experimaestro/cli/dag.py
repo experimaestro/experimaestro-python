@@ -10,6 +10,7 @@ import webbrowser
 from pathlib import Path
 
 import click
+from rich_click import RichCommand
 from termcolor import cprint
 
 from experimaestro.scheduler.state_provider import StateProvider
@@ -69,8 +70,13 @@ def _load_graph(
         try:
             from huggingface_hub import hf_hub_download
 
-            cprint(f"Resolving experimaestro.json from Hugging Face Hub: {target}...", "cyan")
-            hf_file = Path(hf_hub_download(repo_id=target, filename="experimaestro.json"))
+            cprint(
+                f"Resolving experimaestro.json from Hugging Face Hub: {target}...",
+                "cyan",
+            )
+            hf_file = Path(
+                hf_hub_download(repo_id=target, filename="experimaestro.json")
+            )
             graph = load_serialized_graph(hf_file, experiment_id=target)
             statuses = {n.id: "done" for n in graph.nodes.values() if n.kind.is_job}
             return graph, statuses, {}
@@ -85,7 +91,9 @@ def _load_graph(
     try:
         if target and (":" in target or "/" in target):
             try:
-                from experimaestro.tools.inspect_params.discovery import find_job_params_file
+                from experimaestro.tools.inspect_params.discovery import (
+                    find_job_params_file,
+                )
 
                 params_path = find_job_params_file(provider, target)
                 graph = load_serialized_graph(params_path)
@@ -123,7 +131,7 @@ def _parse_filter(spec: str) -> dict[str, object]:
     return tags
 
 
-@click.command(name="dag")
+@click.command(name="dag", cls=RichCommand)
 @click.argument("target", required=False, default=None)
 @click.option("-r", "--run", "run_id", default=None, help="Run ID (default: current)")
 @click.option(
@@ -238,9 +246,7 @@ def dag(
 
     if mermaid_path is not None:
         has_tasks = any(n.kind == NodeKind.TASK for n in graph.nodes.values())
-        view = graph.view(
-            tasks_only=not all_nodes if has_tasks else False, stack=stack
-        )
+        view = graph.view(tasks_only=not all_nodes if has_tasks else False, stack=stack)
         mmd = to_mermaid(graph, view)
         if str(mermaid_path) == "-":
             click.echo(mmd)
@@ -279,12 +285,7 @@ def dag(
                     + (f"  {tags}" if tags else "")
                 )
 
-    if (
-        html_path is None
-        and json_path is None
-        and mermaid_path is None
-        and not tree
-    ):
+    if html_path is None and json_path is None and mermaid_path is None and not tree:
         with tempfile.NamedTemporaryFile(
             "w", suffix=".html", prefix="xpm-dag-", delete=False, encoding="utf-8"
         ) as out:

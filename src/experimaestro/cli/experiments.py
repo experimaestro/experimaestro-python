@@ -7,6 +7,7 @@ from pathlib import Path
 from shutil import rmtree
 
 import click
+from rich_click import RichGroup
 from termcolor import cprint
 
 from experimaestro.settings import get_settings
@@ -19,7 +20,7 @@ from .monitor import experiments_monitor, ssh_monitor
 logger = logging.getLogger(__name__)
 
 
-@click.group()
+@click.group(cls=RichGroup)
 @click.option("--workdir", type=Path, default=None, hidden=True)
 @click.option("--workspace", type=str, default=None, hidden=True)
 @click.pass_obj

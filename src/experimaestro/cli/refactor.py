@@ -7,6 +7,7 @@ from pathlib import Path
 from collections.abc import Iterator
 
 import click
+from rich_click import RichGroup
 from termcolor import cprint
 
 
@@ -200,7 +201,7 @@ def find_python_files(path: Path) -> Iterator[Path]:
             yield py_file
 
 
-@click.group()
+@click.group(cls=RichGroup)
 def refactor():
     """Refactor codebase patterns"""
     pass

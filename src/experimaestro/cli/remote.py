@@ -20,6 +20,7 @@ from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
 import click
+from rich_click import RichCommand
 from termcolor import cprint
 
 from experimaestro.settings import (
@@ -284,7 +285,7 @@ def exit_on_signals() -> None:
             signal.signal(signum, lambda signum, frame: sys.exit(128 + signum))
 
 
-class RemoteCommand(click.Command):
+class RemoteCommand(RichCommand):
     """A command that runs on the remote host when the workspace is remote
 
     The command is run as ``experimaestro [ROOT OPTIONS] --workdir PATH

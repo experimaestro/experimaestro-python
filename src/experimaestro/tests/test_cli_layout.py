@@ -1,6 +1,7 @@
 """Command line layout: root workspace options and the old command names"""
 
 import json
+import re
 
 import pytest
 from click.testing import CliRunner
@@ -21,25 +22,34 @@ def invoke(*args):
     return CliRunner().invoke(cli, [str(arg) for arg in args])
 
 
+def listed(name: str, output: str) -> bool:
+    """Whether the help ``output`` lists the command ``name`` (in a panel)"""
+    return re.search(rf"^\W*{re.escape(name)}\s", output, re.MULTILINE) is not None
+
+
+def without_usage(output: str) -> list[str]:
+    return [line for line in output.splitlines() if "Usage:" not in line]
+
+
 def test_hidden_aliases_not_in_help():
     result = invoke("--help")
     assert result.exit_code == 0, result.output
     for name in ["run", "monitor", "experiments", "jobs", "workspace", "tools"]:
-        assert f"  {name} " in result.output
+        assert listed(name, result.output)
     for name in ["run-experiment", "orphans", "rpyc-server", "parameters-difference"]:
         assert name not in result.output
-    assert "  inspect " not in result.output
+    assert not listed("inspect", result.output)
 
 
 def test_inspect_shortcut():
     """`inspect` is a (hidden, not deprecated) shortcut for `jobs inspect`"""
     shortcut, command = invoke("inspect", "--help"), invoke("jobs", "inspect", "--help")
     assert shortcut.exit_code == 0, shortcut.output
-    assert shortcut.output.startswith("Usage: cli inspect ")
+    assert "Usage: cli inspect " in shortcut.output
     # Same help, but for the usage line
-    assert shortcut.output.splitlines()[1:] == command.output.splitlines()[1:]
+    assert without_usage(shortcut.output) == without_usage(command.output)
     assert "Deprecated" not in shortcut.output
-    assert "  inspect " in invoke("jobs", "--help").output
+    assert listed("inspect", invoke("jobs", "--help").output)
 
 
 @pytest.mark.parametrize(
